@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title></title>
-    <url>/2021/11/28/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1/</url>
+    <title>DDIA第七章-事务笔记</title>
+    <url>/2021/11/29/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
 <ul>
 <li>《数据库系统概念-第七版》第17、18章</li>
@@ -23,10 +23,13 @@
 <li></li>
 </ul>
 ]]></content>
+      <tags>
+        <tag>DDIA</tag>
+      </tags>
   </entry>
   <entry>
-    <title></title>
-    <url>/2021/11/19/DDIA%E7%AC%AC%E4%B8%89%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E4%B8%8E%E6%A3%80%E7%B4%A2/</url>
+    <title>DDIA第三章-数据存储与检索笔记</title>
+    <url>/2021/11/29/DDIA%E7%AC%AC%E4%B8%89%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E4%B8%8E%E6%A3%80%E7%B4%A2%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第三章-数据存储与检索-笔记"><a href="#DDIA第三章-数据存储与检索-笔记" class="headerlink" title="DDIA第三章-数据存储与检索 笔记"></a>DDIA第三章-数据存储与检索 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>开个DDIA的新坑。虽然DDIA笔记全网烂大街，但是自己敲出的好像更香一点，有侧重的记录也方便日后复习。从第三章开始，至少到第九章。三天一篇，不鸽！</p>
 <h2 id="几种索引"><a href="#几种索引" class="headerlink" title="几种索引"></a>几种索引</h2><h3 id="哈希索引"><a href="#哈希索引" class="headerlink" title="哈希索引"></a>哈希索引</h3><p>(key-value, 追加式日志)<br>内存中保存hash map，将每个键一一映射到数据文件中特定的字节偏移量。</p>
 <p>将日志分解成段，当文件达到一定大小就关闭它，将后续写入到新的段文件。每个段有自己独立的hash map。查找时先找最新段的hash map，如果键不存在，检查第二新的段，以此类推。</p>
@@ -127,10 +130,13 @@
 <p>##列存</p>
 <p>略（写了个寂寞）</p>
 ]]></content>
+      <tags>
+        <tag>DDIA</tag>
+      </tags>
   </entry>
   <entry>
-    <title></title>
-    <url>/2021/11/27/DDIA%E7%AC%AC%E4%BA%94%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%A4%8D%E5%88%B6/</url>
+    <title>DDIA第五章-数据复制笔记</title>
+    <url>/2021/11/29/DDIA%E7%AC%AC%E4%BA%94%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%A4%8D%E5%88%B6%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第五章-数据复制-笔记"><a href="#DDIA第五章-数据复制-笔记" class="headerlink" title="DDIA第五章-数据复制 笔记"></a>DDIA第五章-数据复制 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>众所周知，三天==168小时。</p>
 <p>多副本技术主要服务于以下目的：</p>
 <blockquote>
