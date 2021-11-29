@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search>
+  <entry>
+    <title></title>
+    <url>/2021/11/28/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1/</url>
+    <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
+<ul>
+<li>《数据库系统概念-第七版》第17、18章</li>
+<li><a href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
+<li><a href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
+</ul>
+<h2 id="事务的ACID："><a href="#事务的ACID：" class="headerlink" title="事务的ACID："></a>事务的ACID：</h2><ul>
+<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
+<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
+<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
+<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
+</ul>
+<p>下面的内容都是关于Isolation的。</p>
+<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
+<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
+<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
+<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
+<li></li>
+</ul>
+]]></content>
+  </entry>
+  <entry>
+    <title></title>
+    <url>/2021/11/19/DDIA%E7%AC%AC%E4%B8%89%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E4%B8%8E%E6%A3%80%E7%B4%A2/</url>
+    <content><![CDATA[<h1 id="DDIA第三章-数据存储与检索-笔记"><a href="#DDIA第三章-数据存储与检索-笔记" class="headerlink" title="DDIA第三章-数据存储与检索 笔记"></a>DDIA第三章-数据存储与检索 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>开个DDIA的新坑。虽然DDIA笔记全网烂大街，但是自己敲出的好像更香一点，有侧重的记录也方便日后复习。从第三章开始，至少到第九章。三天一篇，不鸽！</p>
+<h2 id="几种索引"><a href="#几种索引" class="headerlink" title="几种索引"></a>几种索引</h2><h3 id="哈希索引"><a href="#哈希索引" class="headerlink" title="哈希索引"></a>哈希索引</h3><p>(key-value, 追加式日志)<br>内存中保存hash map，将每个键一一映射到数据文件中特定的字节偏移量。</p>
+<p>将日志分解成段，当文件达到一定大小就关闭它，将后续写入到新的段文件。每个段有自己独立的hash map。查找时先找最新段的hash map，如果键不存在，检查第二新的段，以此类推。</p>
+<p>可以在后台对这些段执行压缩。</p>
+<p>值得注意的问题：</p>
+<blockquote>
+<ul>
+<li><p>删除记录：在文件中追加一个特殊的删除记录(tombstone)。合并日志段时，一旦发现墓碑标记，则会丢弃这个已删除键的所有值。</p>
+</li>
+<li><p>崩溃恢复：崩溃后，内存中的hash map丢失。原则上可以通过从头读文件，重新构造hash map。优化方法是将每个段的hash map的快照存储在磁盘上。</p>
+</li>
+<li><p>并发控制：由于写入以严格的先后顺序追加到日志中，所以一般写线程只能有一个。追加式日志非原地更新，所以可以被多个线程同时读取。</p>
+</li>
+</ul>
+</blockquote>
+<p>追加式日志的优点：</p>
+<blockquote>
+<ul>
+<li><p>追加和分段合并主要是顺序写，比随机写更好。</p>
+</li>
+<li><p>追加式文件的并发和崩溃恢复更加简单。例如，不必担心在重写值时发生崩溃的情况，留下一个包含部分旧值和部分新值混杂在一起的文件。</p>
+</li>
+<li><p>合并旧段可以避免磁盘空间碎片化的问题。</p>
+</li>
+</ul>
+</blockquote>
+<p>哈希索引的局限性：</p>
+<blockquote>
+<ul>
+<li><p>哈希表必须全部放入内存。原则上可以在磁盘上维护哈希表，但哈希表包含大量随机访问I/O。</p>
+</li>
+<li><p>区域查询效率不高，只能采取逐个查找的方式查询每个键。</p>
+</li>
+</ul>
+</blockquote>
+<h3 id="SSTables和LSM-Tree"><a href="#SSTables和LSM-Tree" class="headerlink" title="SSTables和LSM-Tree"></a>SSTables和LSM-Tree</h3><p>SSTable: Sorted String Table,排序字符串表。要求段文件中的kv对按键排序。</p>
+<p>相较哈希索引的日志段的优点：</p>
+<blockquote>
+<ul>
+<li><p>合并段更加高效：merge sort。</p>
+</li>
+<li><p>不需要在内存中保存所有键的索引：因为是有序的。因此内存索引可以是稀疏的。</p>
+</li>
+<li><p>可以将多个记录压缩到一个块里，稀疏内存索引中的每个条目指向压缩块的开头。可以节省磁盘空间以及节约I/O带宽。</p>
+</li>
+</ul>
+</blockquote>
+<p>LSM-Tree: Log-Structured Merge-Tree，日志结构的合并树。</p>
+<p>构建LSM-Tree的流程：</p>
+<blockquote>
+<ul>
+<li><p>当写入记录时，将其添加到内存的平衡树(又称内存表，memtable，e.g. 红黑树、AVL树)中。</p>
+</li>
+<li><p>当内存表超限时，将其作为SSTable文件写入磁盘。在SSTable写磁盘时，写入可以继续添加一个新的内存表实例。</p>
+</li>
+<li><p>为了处理读请求，先在内存表中查找键，然后是最新的SSTable,次新的SSTable，直到找到目标(或为空)。</p>
+</li>
+<li><p>后台周期性地执行段合并与压缩。</p>
+</li>
+<li><p>如果数据库崩溃，内存表丢失。可以在磁盘上保留一个单独的追加式日志，作为内存表数据的备份.</p>
+</li>
+</ul>
+</blockquote>
+<p>LSM-Tree的优化：</p>
+<blockquote>
+<ul>
+<li><p>查找数据库不存在的键时，需要把内存表和所有的SSTable全部查一遍。可以使用布隆过滤器（检索一个元素是否在集合中，如果过滤器说不在，那就一定不在，如果说在，也可能不在，重点是快）.</p>
+</li>
+<li><p>压缩合并的策略：大小分级(Size-tired compaction)和分层压缩(leveled compaction)。具体可以看这里：<a href="https://zhuanlan.zhihu.com/p/140325974">纯干货！深入探讨 LSM Compaction 机制</a></p>
+<ul>
+<li><p>Size-tired: 较新的和较小的SSTables被连续合并到较旧和较大的SSTables。</p>
+</li>
+<li><p>leveled: 键的范围分裂成多个更小的SSTables，旧数据被移动到单独的“层级”。</p>
+</li>
+</ul>
+</li>
+</ul>
+</blockquote>
+<h3 id="B-Trees"><a href="#B-Trees" class="headerlink" title="B-Trees"></a>B-Trees</h3><p>略</p>
+<h3 id="对比B-Trees和LSM-Trees"><a href="#对比B-Trees和LSM-Trees" class="headerlink" title="对比B-Trees和LSM-Trees"></a>对比B-Trees和LSM-Trees</h3><p>LSM-Trees的优点:</p>
+<blockquote>
+<ul>
+<li><p>LSM-Trees通常能够承受比B-Trees更高的写入吞吐量，一是它们有时可能有较低的写放大，二是它们以顺序方式写入SSTables，而不是重写树中的多个页。</p>
+</li>
+<li><p>LSM-Trees可以支持更好地压缩，因此通常磁盘上的文件比B-Trees小很多。</p>
+</li>
+</ul>
+</blockquote>
+<p>LSM-Trees的缺点: </p>
+<blockquote>
+<ul>
+<li><p>日志结构存储的缺点：压缩时可能干扰正在进行的读写操作。磁盘的并发资源和写入带宽。</p>
+</li>
+<li><p>日志结构的存储引擎可能在不同的段中具有相同键的多个副本。B-trees的每个键都唯一对应一个位置，对事务语义友好。</p>
+</li>
+</ul>
+</blockquote>
+<p>##列存</p>
+<p>略（写了个寂寞）</p>
+]]></content>
+  </entry>
+  <entry>
+    <title></title>
+    <url>/2021/11/27/DDIA%E7%AC%AC%E4%BA%94%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%A4%8D%E5%88%B6/</url>
+    <content><![CDATA[<h1 id="DDIA第五章-数据复制-笔记"><a href="#DDIA第五章-数据复制-笔记" class="headerlink" title="DDIA第五章-数据复制 笔记"></a>DDIA第五章-数据复制 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>众所周知，三天==168小时。</p>
+<p>多副本技术主要服务于以下目的：</p>
+<blockquote>
+<ul>
+<li><p>高可用性：即使某台机器出现故障，系统也能正常运行</p>
+</li>
+<li><p>连接断开与容错：允许应用程序在出现网络中断时继续工作。</p>
+</li>
+<li><p>低延迟：将数据放置在距离用户较劲的地方，从而实现更快地交互。</p>
+</li>
+<li><p>可扩展性：采用多副本读取，大幅提高系统读操作的吞吐量。</p>
+</li>
+</ul>
+</blockquote>
+<p>本章主要讨论了三种多副本方案：主从复制、多主节点复制、无主节点复制。</p>
+<p>本章主要讨论数据库实践中常用的、相对简单的复制技术，不涉及多副本一致性和共识。</p>
+<h2 id="主从复制"><a href="#主从复制" class="headerlink" title="主从复制"></a>主从复制</h2><p>只能在主节点写，可以在所有节点读。</p>
+<p>同步/异步复制</p>
+<blockquote>
+<ul>
+<li>同步复制：主节点等待确认其他从节点写入数据后才报告成功写入。</li>
+<li>异步复制：主节点写入后即返回写入成功。</li>
+</ul>
+</blockquote>
+<h3 id="复制日志的实现方式"><a href="#复制日志的实现方式" class="headerlink" title="复制日志的实现方式"></a>复制日志的实现方式</h3><h4 id="基于语句的复制"><a href="#基于语句的复制" class="headerlink" title="基于语句的复制"></a>基于语句的复制</h4><p>主节点将每个操作语句记录下来作为日志发给从节点。对于关系型数据库，就是发SQL。</p>
+<p>不适用：</p>
+<blockquote>
+<ul>
+<li>任何调用非确定性函数的语句：如NOW()获取当前时间，RAND()获取随机数，可能在不同的副本上产生不同的值。主节点可以将非确定性函数替换为执行后的结果。</li>
+<li>语句中使用了自增列，或是依赖于数据库的现有数据（如UPDATE … WHERE &lt;某些条件&gt;），则所有副本必须按照完全相同的顺序执行。进而，如果有并发执行的事务，会有很大限制。</li>
+<li>有副作用的语句（如，触发器、存储过程、用户定义的函数等），可能会在不同的副本上产生不同的副作用。</li>
+</ul>
+</blockquote>
+<h4 id="基于write-ahead-log传输"><a href="#基于write-ahead-log传输" class="headerlink" title="基于write-ahead log传输"></a>基于write-ahead log传输</h4><p>不管是日志结构存储引擎（LSM-Trees，log本来就是主要存储方式）还是采用覆盖写磁盘的B-Trees（WAL），都会有一个追加写的log。可以将该log发给从节点来构建副本。</p>
+<p>缺点是log描述的数据结果非常底层：一个WAL包含了哪些磁盘块多哪些字节发生改变。这使得复制方案与存储引擎紧密耦合，要求主从节点的软件版本一致。</p>
+<h4 id="基于行的逻辑日志复制"><a href="#基于行的逻辑日志复制" class="headerlink" title="基于行的逻辑日志复制"></a>基于行的逻辑日志复制</h4><p>与WAL相对的，复制和存储引擎采取不同的日志格式，让复制和存储逻辑剥离。这种复制日志被称为逻辑日志，以区分物理存储引擎的数据表示。</p>
+<p>对于关系数据库来说，逻辑日志通常是指一系列记录来描述数据表<strong>行级别</strong>的写请求。</p>
+<blockquote>
+<ul>
+<li>对于行插入，逻辑日志包含所有相关列的新值。</li>
+<li>对于行删除，逻辑日志里包含足够的信息来唯一标识已删除的行，通常是靠主键。</li>
+<li>对于行更新，逻辑日志里包含足够的信息来唯一标识更新的行，以及所有列的新值。</li>
+</ul>
+</blockquote>
+<h4 id="基于触发器的复制"><a href="#基于触发器的复制" class="headerlink" title="基于触发器的复制"></a>基于触发器的复制</h4><p>某些情况下，需要将复制控制交给应用程序层，如，只想复制数据的一部分，想从一种数据库复制到另一种数据库，需要订制、管理冲突解决逻辑。</p>
+<p>触发器支持注册自己的应用层代码，使得当数据库系统发生数据更改（写事务）时自动执行自定义代码。</p>
+<h2 id="复制滞后导致的三个问题"><a href="#复制滞后导致的三个问题" class="headerlink" title="复制滞后导致的三个问题"></a>复制滞后导致的三个问题</h2><p>异步复制会导致复制滞后，从而导致三个（本节主要介绍三个）问题：读自己的写、单调读、前缀一致读。</p>
+<h3 id="读自己的写-Reading-Your-Own-Writes"><a href="#读自己的写-Reading-Your-Own-Writes" class="headerlink" title="读自己的写(Reading Your Own Writes)"></a>读自己的写(Reading Your Own Writes)</h3><p>问题描述：应用层将数据写入主节点，由于异步复制，数据未到某从节点，应用层从该从节点读数据时就读不到自己刚写的数据。</p>
+<p>对于这种情况，需要“写后读一致性”（read-after-write consistency)，也称“读写一致性”(read-your-writes consistency)。该机制保证如果用户重新加载页面，他们总是能看到自己最近提交的更新，但对其他用户没有任何保证。</p>
+<p>基于主从复制的系统的可行方案：</p>
+<blockquote>
+<ul>
+<li>如果用户访问可能会被修改的内容，从主节点读取；否则，在从节点读取。这要求在查询之前就知道内容是否可能被修改。比如，用户的首页信息只能由所有者编辑，其他人无法编辑，因此可以制定规则：总是从主节点读取用户自己的首页信息数据。比如，跟踪最近更新的时间，如果更新后一分钟以内，则总是在主节点读取。</li>
+<li>客户端记录最近更新的时间戳，并附在读请求里。如果某从节点不够新，就换另一个节点。</li>
+<li>如果副本分布在多数据中心，则将请求路由到主节点所在的数据中心（因为这里的节点更快被同步）。</li>
+</ul>
+</blockquote>
+<h3 id="单调读（Monotonic-Reads）"><a href="#单调读（Monotonic-Reads）" class="headerlink" title="单调读（Monotonic Reads）"></a>单调读（Monotonic Reads）</h3><p>问题描述：连续两次读，第二次读的落后于第一次读。单调读一致性保证不会出现这种情况。</p>
+<p>实现单调读的一种方式，确保同一用户总是从固定的副本读取。</p>
+<h3 id="前缀一致读（Consistent-Prefix-Reads）"><a href="#前缀一致读（Consistent-Prefix-Reads）" class="headerlink" title="前缀一致读（Consistent Prefix Reads）"></a>前缀一致读（Consistent Prefix Reads）</h3><p>对于一系列按照某个顺序发生的写请求，读取这些内容时也会按照当时写入的顺序。这是分片数据库出现的一个特殊问题。</p>
+<p>一个解决方案是确保任何具有因果关系顺序的写入都交给一个分区来完成。</p>
+<h2 id="多主节点复制"><a href="#多主节点复制" class="headerlink" title="多主节点复制"></a>多主节点复制</h2><p>多个主节点接受写入</p>
+<p>适用场景</p>
+<blockquote>
+<ul>
+<li>多数据中心:每个数据中心内，采用常规的主从复制方案；在数据中心之间，多个主节点相互进行数据多交换、更新。</li>
+<li>离线客户端操作：离线状态下，本地设备相当于一个主节点数据库。在离线状态下的任何更改，会在下次上线后，与服务器和其他设备同步。从架构层面看，这相当于数据中心之间的多主复制，只不过是数据中心之间网络连接非常不可靠的极端情况。</li>
+<li>协作编辑：多个用户同时编辑文档。当一个用户编辑时，所做的更改会立即应用到本地副本，然后异步复制到服务器以及编辑统一文档的其他用户。</li>
+</ul>
+</blockquote>
+<h3 id="处理写冲突"><a href="#处理写冲突" class="headerlink" title="处理写冲突"></a>处理写冲突</h3><p>多主复制的最大问题就是可能发生写冲突，必须有解决冲突的方案。</p>
+<p>收敛于一致状态：所有的复制模型至少应该确保数据在所有副本中最终状态是一致的。因此，数据库必须以一种收敛趋同的方式解决冲突。实现收敛的冲突解决有以下可能的方式：</p>
+<blockquote>
+<ul>
+<li>给每个写入分配一个唯一的ID，制定规则选出胜利者，并丢弃其他写入。会造成数据丢失。</li>
+<li>给每个副本分配一个唯一的ID，并制定规则，例如ID大的副本写入始终优先于ID小的副本。会造成数据丢失。</li>
+<li>以某种方式将这些值合并在一起。</li>
+<li>记录和保留冲突相关的所有信息，然后依靠应用层的逻辑，事后解决冲突。</li>
+</ul>
+</blockquote>
+<h2 id="无主节点复制"><a href="#无主节点复制" class="headerlink" title="无主节点复制"></a>无主节点复制</h2><p>允许任何副本直接接受写请求。</p>
+<h3 id="Quorum"><a href="#Quorum" class="headerlink" title="Quorum"></a>Quorum</h3><p>n个副本，写入需要w个节点确认，读取需要至少查询r个节点，如果 w+r&gt;n，则读取的节点中可以保证包含最新值。</p>
+<h4 id="quorum的局限性"><a href="#quorum的局限性" class="headerlink" title="quorum的局限性"></a>quorum的局限性</h4><blockquote>
+<ul>
+<li>如果采用了sloppy quorum，则不能保证读到最新值。</li>
+<li>如果两个写操作同时进行，无法明确先后顺序。需要合并写入并发。</li>
+<li>如果写与读并发，写操作可能仅在部分副本完成，此时读到的是新值还是旧值存在不确定性。</li>
+<li>如果某些副本上写成功，某些副本上写入失败，总的成功副本少于w，那些成功的副本不会回滚，后续的读操作可能会读到不该读到的新值。</li>
+<li>如果具有新值的节点失效，且后续恢复时数据来自某旧值节点，则新值数量少于w，打破了w+r&gt;n。</li>
+<li>即使一切工作正常，也会出现一些边界情况，详情见第9章。</li>
+</ul>
+</blockquote>
+<p>quorum通常无法得到本章罗列的一致性保证，包括写后读、单调读、前缀一致读等。</p>
+<h4 id="sloppy-quorum"><a href="#sloppy-quorum" class="headerlink" title="sloppy quorum"></a>sloppy quorum</h4><p>当出现网络问题时，无法满足w和r的数量。可以将写请求暂时放在不属于n集合的其他临时节点中，令写和读满足w和r。等网络问题解决，再将临时节点中的数据回传给原始节点。sloppy quorum是为了提高写入的可用性，但也意味着即使满足w+r&gt;n，也不能保证读取到新值，因为新值可能存在于临时节点，还没被回传过来。</p>
+<h3 id="检测并发写（处理写冲突）"><a href="#检测并发写（处理写冲突）" class="headerlink" title="检测并发写（处理写冲突）"></a>检测并发写（处理写冲突）</h3><h4 id="最后写入者获胜（last-write-wins，LWW）"><a href="#最后写入者获胜（last-write-wins，LWW）" class="headerlink" title="最后写入者获胜（last write wins，LWW）"></a>最后写入者获胜（last write wins，LWW）</h4><p>为每个写请求附加一个时间戳，选择最新的时间戳，丢弃较早时间戳的写入。LWW会删除非并发写（因为时钟同步问题，第8章）。</p>
+<h4 id="版本矢量"><a href="#版本矢量" class="headerlink" title="版本矢量"></a>版本矢量</h4><p>DDIA讲得太少了，有空补一下。</p>
+]]></content>
+  </entry>
+  <entry>
+    <title>Hello World</title>
+    <url>/2021/11/29/hello-world/</url>
+    <content><![CDATA[<p>Welcome to <a href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/writing.html">Writing</a></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/server.html">Server</a></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/generating.html">Generating</a></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
+]]></content>
+  </entry>
+</search>
