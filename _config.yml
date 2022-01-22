@@ -103,6 +103,12 @@ theme: ayer
 ## Docs: https://hexo.io/docs/one-command-deployment
 deploy:
   type: git
-  repo: https://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@github.com/sWildGold/sWildGold.github.io
+  repo: https://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@github.com/sWildGold/sWildGold.github.io
   # example, https://github.com/hexojs/hexojs.github.io
   branch: deploy
+
+# Hexo-generator-search
+search:
+  path: search.xml
+  field: post
+  format: html
