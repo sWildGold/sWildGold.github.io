@@ -156,6 +156,94 @@
     
     
     <article
+  id="post-DDIA第七章-事务笔记"
+  class="article article-type-post"
+  itemscope
+  itemprop="blogPost"
+  data-scroll-reveal
+>
+  <div class="article-inner">
+    
+    <header class="article-header">
+       
+<h2 itemprop="name">
+  <a class="article-title" href="/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/"
+    >DDIA第七章-事务笔记</a> 
+</h2>
+ 
+
+      
+    </header>
+     
+    <div class="article-meta">
+      <a href="/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/" class="article-date">
+  <time datetime="2022-01-22T14:46:54.000Z" itemprop="datePublished">2022-01-22</time>
+</a>    
+    </div>
+      
+    <div class="article-entry" itemprop="articleBody">
+       
+  <h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
+<ul>
+<li>《数据库系统概念-第七版》第17、18章</li>
+<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
+<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
+</ul>
+<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
+<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
+<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
+<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
+<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
+</ul>
+<p>下面的内容都是关于Isolation的。</p>
+<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
+<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
+<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
+<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
+<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
+<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
+<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。</li>
+</ul>
+<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。</p>
+<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
+<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
+<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
+</ul>
+<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
+<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
+<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
+<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
+<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
+</ul>
+<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
+<p>谓词锁会限制如下访问：</p>
+<ul>
+<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
+<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
+</ul>
+<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
+ 
+      <!-- reward -->
+      
+    </div>
+    
+
+    <!-- copyright -->
+    
+    <footer class="article-footer">
+       
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/DDIA/" rel="tag">DDIA</a></li></ul>
+
+    </footer>
+  </div>
+
+    
+ 
+    
+</article>
+
+    
+    <article
   id="post-DDIA第五章-数据复制笔记"
   class="article article-type-post"
   itemscope
@@ -183,8 +271,7 @@
       
     <div class="article-entry" itemprop="articleBody">
        
-  <h1 id="DDIA第五章-数据复制-笔记"><a href="#DDIA第五章-数据复制-笔记" class="headerlink" title="DDIA第五章-数据复制 笔记"></a>DDIA第五章-数据复制 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>众所周知，三天==168小时。</p>
-<p>多副本技术主要服务于以下目的：</p>
+  <h1 id="DDIA第五章-数据复制-笔记"><a href="#DDIA第五章-数据复制-笔记" class="headerlink" title="DDIA第五章-数据复制 笔记"></a>DDIA第五章-数据复制 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>多副本技术主要服务于以下目的：</p>
 <blockquote>
 <ul>
 <li><p>高可用性：即使某台机器出现故障，系统也能正常运行</p>
@@ -447,74 +534,6 @@
 
     
     <article
-  id="post-DDIA第七章-事务笔记"
-  class="article article-type-post"
-  itemscope
-  itemprop="blogPost"
-  data-scroll-reveal
->
-  <div class="article-inner">
-    
-    <header class="article-header">
-       
-<h2 itemprop="name">
-  <a class="article-title" href="/2021/11/29/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/"
-    >DDIA第七章-事务笔记</a> 
-</h2>
- 
-
-      
-    </header>
-     
-    <div class="article-meta">
-      <a href="/2021/11/29/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/" class="article-date">
-  <time datetime="2021-11-29T14:46:54.000Z" itemprop="datePublished">2021-11-29</time>
-</a>    
-    </div>
-      
-    <div class="article-entry" itemprop="articleBody">
-       
-  <h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
-<ul>
-<li>《数据库系统概念-第七版》第17、18章</li>
-<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
-<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
-</ul>
-<h2 id="事务的ACID："><a href="#事务的ACID：" class="headerlink" title="事务的ACID："></a>事务的ACID：</h2><ul>
-<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
-<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
-<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
-<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
-</ul>
-<p>下面的内容都是关于Isolation的。</p>
-<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
-<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
-<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
-<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
-<li></li>
-</ul>
- 
-      <!-- reward -->
-      
-    </div>
-    
-
-    <!-- copyright -->
-    
-    <footer class="article-footer">
-       
-  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/DDIA/" rel="tag">DDIA</a></li></ul>
-
-    </footer>
-  </div>
-
-    
- 
-    
-</article>
-
-    
-    <article
   id="post-hello-world"
   class="article article-type-post"
   itemscope
@@ -586,7 +605,7 @@
     <ul>
       <li>
         Copyrights &copy;
-        2015-2021
+        2015-2022
         <i class="ri-heart-fill heart_icon"></i> John Doe
       </li>
     </ul>
