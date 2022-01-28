@@ -255,7 +255,7 @@
 ]]></content>
   </entry>
   <entry>
-    <title>DDIA第七章-事务笔记</title>
+    <title>Paxos 笔记</title>
     <url>/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
 <ul>
