@@ -82,7 +82,7 @@
         <span class="post-meta-item-icon">
             <i class="ri-quill-pen-line"></i>
             <span class="post-meta-item-text"> Word count:</span>
-            <span class="post-count">847</span>
+            <span class="post-count">912</span>
         </span>
     </span>
 
@@ -91,7 +91,7 @@
         <span class="post-meta-item-icon">
             <i class="ri-book-open-line"></i>
             <span class="post-meta-item-text"> Reading time≈</span>
-            <span class="post-count">3 min</span>
+            <span class="post-count">4 min</span>
         </span>
     </span>
 </div>
@@ -107,6 +107,12 @@
     <div class="article-entry" itemprop="articleBody">
        
   <h1 id="算法题-易忘点"><a href="#算法题-易忘点" class="headerlink" title="算法题-易忘点"></a>算法题-易忘点</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文收录我在刷算法题时常用常忘的一些知识点，包含但不限于算法套路、STL使用等。长期更新</p>
+<h2 id="STL使用"><a href="#STL使用" class="headerlink" title="STL使用"></a>STL使用</h2><h3 id="stack"><a href="#stack" class="headerlink" title="stack"></a>stack</h3><p><img src="../_pic/c++stack.jpeg" alt="stack"></p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">std::stack&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word = words.<span class="built_in">top</span>();</span><br><span class="line">words.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
+<h3 id="queue"><a href="#queue" class="headerlink" title="queue"></a>queue</h3><p><img src="../_pic/c++queue.jpeg" alt="queue"></p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">std::queue&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word=words.<span class="built_in">front</span>();</span><br><span class="line">word=words.<span class="built_in">back</span>();</span><br><span class="line">word.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
 <h2 id="二分查找"><a href="#二分查找" class="headerlink" title="二分查找"></a>二分查找</h2><h3 id="lower-bound-和-upper-bound"><a href="#lower-bound-和-upper-bound" class="headerlink" title="lower_bound 和 upper_bound"></a>lower_bound 和 upper_bound</h3><p>c++的algorithm头文件</p>
 <ul>
 <li>lower_bound:找到 <strong>大于等于</strong>目标元素 的下标。找到的是<strong>第一个</strong>可插入的位置，所以是lower。</li>
@@ -207,6 +213,15 @@
 
    
   <nav class="article-nav">
+    
+      <a href="/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/" class="article-nav-link">
+        <strong class="article-nav-caption">上一篇</strong>
+        <div class="article-nav-title">
+          
+            DDIA第七章-事务笔记
+          
+        </div>
+      </a>
     
     
       <a href="/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/" class="article-nav-link">
