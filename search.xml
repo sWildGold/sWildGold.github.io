@@ -1,104 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
-    <title>DDIA第七章-事务笔记</title>
-    <url>/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/</url>
-    <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
-<ul>
-<li>《数据库系统概念-第七版》第17、18章</li>
-<li><a href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
-<li><a href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
-</ul>
-<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
-<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
-<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
-<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
-<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
-</ul>
-<p>下面的内容都是关于Isolation的。</p>
-<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
-<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
-<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
-<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
-<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
-<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
-<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。</li>
-</ul>
-<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。</p>
-<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
-<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
-<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
-</ul>
-<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
-<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
-<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
-<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
-<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
-</ul>
-<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
-<p>谓词锁会限制如下访问：</p>
-<ul>
-<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
-<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
-</ul>
-<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
-]]></content>
-      <tags>
-        <tag>DDIA</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>Hello World</title>
-    <url>/2021/11/29/hello-world/</url>
-    <content><![CDATA[<p>Welcome to <a href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
-<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
-
-<p>More info: <a href="https://hexo.io/docs/writing.html">Writing</a></p>
-<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a href="https://hexo.io/docs/server.html">Server</a></p>
-<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a href="https://hexo.io/docs/generating.html">Generating</a></p>
-<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
-
-<p>More info: <a href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
-]]></content>
-  </entry>
-  <entry>
-    <title>算法题-易忘点</title>
-    <url>/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/</url>
-    <content><![CDATA[<h1 id="算法题-易忘点"><a href="#算法题-易忘点" class="headerlink" title="算法题-易忘点"></a>算法题-易忘点</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文收录我在刷算法题时常用常忘的一些知识点，包含但不限于算法套路、STL使用等。长期更新</p>
-<h2 id="STL使用"><a href="#STL使用" class="headerlink" title="STL使用"></a>STL使用</h2><h3 id="stack"><a href="#stack" class="headerlink" title="stack"></a>stack</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++stack.jpeg" alt="stack"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::stack&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word = words.<span class="built_in">top</span>();</span><br><span class="line">words.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
-
-<h3 id="queue"><a href="#queue" class="headerlink" title="queue"></a>queue</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++queue.jpeg" alt="queue"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::queue&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word=words.<span class="built_in">front</span>();</span><br><span class="line">word=words.<span class="built_in">back</span>();</span><br><span class="line">word.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
-
-<h2 id="二分查找"><a href="#二分查找" class="headerlink" title="二分查找"></a>二分查找</h2><h3 id="lower-bound-和-upper-bound"><a href="#lower-bound-和-upper-bound" class="headerlink" title="lower_bound 和 upper_bound"></a>lower_bound 和 upper_bound</h3><p>c++的algorithm头文件</p>
-<ul>
-<li>lower_bound:找到 <strong>大于等于</strong>目标元素 的下标。找到的是<strong>第一个</strong>可插入的位置，所以是lower。</li>
-<li>upper_bound:找到 <strong>大于</strong>目标元素 的下标。找到的是<strong>最后一个</strong>可插入的位置，所以是upper。</li>
-</ul>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="built_in">sort</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());<span class="comment">//进行二分之前需要排序</span></span><br><span class="line"><span class="keyword">int</span> pos = <span class="built_in">lower_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>()) - vec.<span class="built_in">begin</span>();  </span><br><span class="line"><span class="keyword">int</span> num = *<span class="built_in">upper_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());</span><br></pre></td></tr></table></figure>
-
-<h3 id="二分查找的实现"><a href="#二分查找的实现" class="headerlink" title="二分查找的实现"></a>二分查找的实现</h3><p><a href="https://zhuanlan.zhihu.com/p/343138037">聊聊一看就会一写就跪的二分查找</a></p>
-<p>此文将所有二分查找问题变种抽象为一个基本问题</p>
-<blockquote>
-<p>在一个左边全是 false 右边全是 true 的数组中，有且只有一个从 false 突变为 true 的点，二分查找其实就是要找到这个突变点。</p>
-</blockquote>
-<p><img src="../_pic/binarySearch1.png" alt="binarySearch1"></p>
-<p><img src="../_pic/binarySearch2.png" alt="binarySearch2"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="function">func <span class="title">BSearch</span><span class="params">(l, r <span class="keyword">int</span>, f func(<span class="keyword">int</span>) <span class="keyword">bool</span>)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">for</span> l &lt; r &#123;</span><br><span class="line">        <span class="comment">// 注意这里是为了避免溢出</span></span><br><span class="line">        m := l + (r - l) / <span class="number">2</span></span><br><span class="line">        <span class="keyword">if</span> !<span class="built_in">f</span>(m) &#123;</span><br><span class="line">            l = m + <span class="number">1</span></span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            r = m</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> l</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>核心就是想办法把问题转化成基本问题中的布尔数组。</p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line"><span class="function">func <span class="title">FirstGtInAsc</span><span class="params">(array []string, target string)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-]]></content>
-      <tags>
-        <tag>算法题</tag>
-      </tags>
-  </entry>
-  <entry>
     <title>DDIA第三章-数据存储与检索笔记</title>
     <url>/2021/11/29/DDIA%E7%AC%AC%E4%B8%89%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E4%B8%8E%E6%A3%80%E7%B4%A2%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第三章-数据存储与检索-笔记"><a href="#DDIA第三章-数据存储与检索-笔记" class="headerlink" title="DDIA第三章-数据存储与检索 笔记"></a>DDIA第三章-数据存储与检索 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>开个DDIA的新坑。虽然DDIA笔记全网烂大街，但是自己敲出的好像更香一点，有侧重的记录也方便日后复习。从第三章开始，至少到第九章。三天一篇，不鸽！</p>
@@ -306,6 +208,53 @@
 ]]></content>
   </entry>
   <entry>
+    <title>DDIA第七章-事务笔记</title>
+    <url>/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/</url>
+    <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
+<ul>
+<li>《数据库系统概念-第七版》第17、18章</li>
+<li><a href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
+<li><a href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
+</ul>
+<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
+<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
+<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
+<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
+<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
+</ul>
+<p>下面的内容都是关于Isolation的。</p>
+<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
+<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
+<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
+<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
+<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
+<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
+<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。</li>
+</ul>
+<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。</p>
+<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
+<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
+<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
+</ul>
+<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
+<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
+<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
+<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
+<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
+</ul>
+<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
+<p>谓词锁会限制如下访问：</p>
+<ul>
+<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
+<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
+</ul>
+<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
+]]></content>
+      <tags>
+        <tag>DDIA</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>Paxos 笔记</title>
     <url>/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
@@ -385,5 +334,56 @@
       <tags>
         <tag>Paxos</tag>
       </tags>
+  </entry>
+  <entry>
+    <title>算法题-易忘点</title>
+    <url>/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/</url>
+    <content><![CDATA[<h1 id="算法题-易忘点"><a href="#算法题-易忘点" class="headerlink" title="算法题-易忘点"></a>算法题-易忘点</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文收录我在刷算法题时常用常忘的一些知识点，包含但不限于算法套路、STL使用等。长期更新</p>
+<h2 id="STL使用"><a href="#STL使用" class="headerlink" title="STL使用"></a>STL使用</h2><h3 id="stack"><a href="#stack" class="headerlink" title="stack"></a>stack</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++stack.jpeg" alt="stack"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::stack&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word = words.<span class="built_in">top</span>();</span><br><span class="line">words.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
+<h3 id="queue"><a href="#queue" class="headerlink" title="queue"></a>queue</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++queue.jpeg" alt="queue"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::queue&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word=words.<span class="built_in">front</span>();</span><br><span class="line">word=words.<span class="built_in">back</span>();</span><br><span class="line">word.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
+<h2 id="二分查找"><a href="#二分查找" class="headerlink" title="二分查找"></a>二分查找</h2><h3 id="lower-bound-和-upper-bound"><a href="#lower-bound-和-upper-bound" class="headerlink" title="lower_bound 和 upper_bound"></a>lower_bound 和 upper_bound</h3><p>c++的algorithm头文件</p>
+<ul>
+<li>lower_bound:找到 <strong>大于等于</strong>目标元素 的下标。找到的是<strong>第一个</strong>可插入的位置，所以是lower。</li>
+<li>upper_bound:找到 <strong>大于</strong>目标元素 的下标。找到的是<strong>最后一个</strong>可插入的位置，所以是upper。</li>
+</ul>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="built_in">sort</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());<span class="comment">//进行二分之前需要排序</span></span><br><span class="line"><span class="keyword">int</span> pos = <span class="built_in">lower_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>()) - vec.<span class="built_in">begin</span>();  </span><br><span class="line"><span class="keyword">int</span> num = *<span class="built_in">upper_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());</span><br></pre></td></tr></table></figure>
+
+<h3 id="二分查找的实现"><a href="#二分查找的实现" class="headerlink" title="二分查找的实现"></a>二分查找的实现</h3><p><a href="https://zhuanlan.zhihu.com/p/343138037">聊聊一看就会一写就跪的二分查找</a></p>
+<p>此文将所有二分查找问题变种抽象为一个基本问题</p>
+<blockquote>
+<p>在一个左边全是 false 右边全是 true 的数组中，有且只有一个从 false 突变为 true 的点，二分查找其实就是要找到这个突变点。</p>
+</blockquote>
+<p><img src="../_pic/binarySearch1.png" alt="binarySearch1"></p>
+<p><img src="../_pic/binarySearch2.png" alt="binarySearch2"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="function">func <span class="title">BSearch</span><span class="params">(l, r <span class="keyword">int</span>, f func(<span class="keyword">int</span>) <span class="keyword">bool</span>)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">for</span> l &lt; r &#123;</span><br><span class="line">        <span class="comment">// 注意这里是为了避免溢出</span></span><br><span class="line">        m := l + (r - l) / <span class="number">2</span></span><br><span class="line">        <span class="keyword">if</span> !<span class="built_in">f</span>(m) &#123;</span><br><span class="line">            l = m + <span class="number">1</span></span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            r = m</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> l</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>核心就是想办法把问题转化成基本问题中的布尔数组。</p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line"><span class="function">func <span class="title">FirstGtInAsc</span><span class="params">(array []string, target string)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+]]></content>
+      <tags>
+        <tag>算法题</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>Hello World</title>
+    <url>/2021/11/29/hello-world/</url>
+    <content><![CDATA[<p>Welcome to <a href="https://hexo.io/">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues">GitHub</a>.</p>
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo new <span class="string">&quot;My New Post&quot;</span></span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/writing.html">Writing</a></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo server</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/server.html">Server</a></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo generate</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/generating.html">Generating</a></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="code"><pre><span class="line">$ hexo deploy</span><br></pre></td></tr></table></figure>
+
+<p>More info: <a href="https://hexo.io/docs/one-command-deployment.html">Deployment</a></p>
+]]></content>
   </entry>
 </search>
