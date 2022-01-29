@@ -1,6 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <search>
   <entry>
+    <title>DDIA第七章-事务笔记</title>
+    <url>/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/</url>
+    <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
+<ul>
+<li>《数据库系统概念-第七版》第17、18章</li>
+<li><a href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
+<li><a href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
+</ul>
+<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
+<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
+<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
+<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
+<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
+</ul>
+<p>下面的内容都是关于Isolation的。</p>
+<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
+<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
+<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
+<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
+<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
+<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
+<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。</li>
+</ul>
+<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。</p>
+<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
+<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
+<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
+</ul>
+<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
+<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
+<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
+<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
+<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
+</ul>
+<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
+<p>谓词锁会限制如下访问：</p>
+<ul>
+<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
+<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
+</ul>
+<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
+]]></content>
+      <tags>
+        <tag>DDIA</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>DDIA第三章-数据存储与检索笔记</title>
     <url>/2021/11/29/DDIA%E7%AC%AC%E4%B8%89%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%AD%98%E5%82%A8%E4%B8%8E%E6%A3%80%E7%B4%A2%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第三章-数据存储与检索-笔记"><a href="#DDIA第三章-数据存储与检索-笔记" class="headerlink" title="DDIA第三章-数据存储与检索 笔记"></a>DDIA第三章-数据存储与检索 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>开个DDIA的新坑。虽然DDIA笔记全网烂大街，但是自己敲出的好像更香一点，有侧重的记录也方便日后复习。从第三章开始，至少到第九章。三天一篇，不鸽！</p>
@@ -108,6 +155,134 @@
       </tags>
   </entry>
   <entry>
+    <title>Paxos 笔记</title>
+    <url>/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/</url>
+    <content><![CDATA[<h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
+<ul>
+<li><a href="https://zhuanlan.zhihu.com/p/31780743">Paxos算法详解 作者：祥光</a></li>
+<li><a href="https://ying-zhang.github.io/dist/2001-paxos_made_simple-cn/">paxos made simple译文 作者：张营</a></li>
+<li><a href="https://zhuanlan.zhihu.com/p/258929773">PAXOS Paxos Made Simp阅读笔记 作者：不想说</a></li>
+<li><a href="http://oceanbase.org.cn/?p=90">[Paxos三部曲之一] 使用Basic-Paxos协议的日志同步与恢复 作者：郁白</a></li>
+</ul>
+<p>Paxos算法通过一个决议分为两个阶段（Learn阶段之前决议已经形成）：</p>
+<ul>
+<li>第一阶段：Prepare阶段。Proposer向Acceptors发出Prepare请求，Acceptors针对收到的Prepare请求进行Promise承诺。</li>
+<li>第二阶段：Accept阶段。Proposer收到多数Acceptors承诺的Promise后，向Acceptors发出Propose请求，Acceptors针对收到的Propose请求进行Accept处理。</li>
+<li>第三阶段：Learn阶段。Proposer在收到多数Acceptors的Accept之后，标志着本次Accept成功，决议形成，将形成的决议发送给所有Learners。</li>
+</ul>
+<p>Paxos算法流程中的每条消息描述如下：</p>
+<p><strong>Prepare</strong>: Proposer生成全局唯一且递增的Proposal ID (可使用时间戳加Server ID)，向所有Acceptors发送Prepare请求，这里无需携带提案内容，只携带Proposal ID即可。<br><strong>Promise</strong>: Acceptors收到Prepare请求后，做出“两个承诺，一个应答”。<br>两个承诺：</p>
+<ol>
+<li><p>不再接受Proposal ID小于等于（注意：这里是&lt;= ）当前请求的Prepare请求。</p>
+</li>
+<li><p>不再接受Proposal ID小于（注意：这里是&lt; ）当前请求的Propose请求。</p>
+</li>
+</ol>
+<p>一个应答：</p>
+<p>不违背以前作出的承诺下，回复已经Accept过的提案中Proposal ID最大的那个提案的Value和Proposal ID，没有则返回空值。</p>
+<p><strong>Propose</strong>: Proposer 收到多数Acceptors的Promise应答后，从应答中选择Proposal ID最大的提案的Value，作为本次要发起的提案。如果所有应答的提案Value均为空值，则可以自己随意决定提案Value。然后携带当前Proposal ID，向所有Acceptors发送Propose请求。</p>
+<p><strong>Accept</strong>: Acceptor收到Propose请求后，在不违背自己之前作出的承诺下，接受并持久化当前Proposal ID和提案Value。<br>Learn: Proposer收到多数Acceptors的Accept后，决议形成，将形成的决议发送给所有Learners。</p>
+<p>Paxos算法伪代码描述如下：</p>
+<p><img src="../_pic/basic_paxos_pseudocode.jpeg" alt="basic_paxos_Pseudocode"></p>
+<ol>
+<li>获取一个Proposal ID n，为了保证Proposal ID唯一，可采用时间戳+Server ID生成；(其实不需要唯一，见下方讨论)</li>
+<li>Proposer向所有Acceptors广播Prepare(n)请求；</li>
+<li>Acceptor比较n和minProposal，如果n&gt;minProposal，minProposal=n，并且将 acceptedProposal 和 acceptedValue 返回；</li>
+<li>Proposer接收到过半数回复后，如果发现有acceptedValue返回，将所有回复中acceptedProposal最大的acceptedValue作为本次提案的value，否则可以任意决定本次提案的value；</li>
+<li>到这里可以进入第二阶段，广播Accept (n,value) 到所有节点；</li>
+<li>Acceptor比较n和minProposal，如果n&gt;=minProposal，则acceptedProposal=minProposal=n，acceptedValue=value，本地持久化后，返回；否则，返回minProposal。</li>
+<li>提议者接收到过半数请求后，如果发现有返回值result &gt;n，表示有更新的提议，跳转到1；否则value达成一致。</li>
+</ol>
+<p>值得注意的点：</p>
+<ol>
+<li>paxos有活锁问题吗，怎么解决？<ul>
+<li>有。两个Proposer因为自己的Proposal ID过低，不断增加ID，你编号高，我再比你更高，反复如此，算法永远无法结束。</li>
+<li>解决方法：multi-paxos通过选举出一个Proposer作Leader，所有的Proposal都通过Leader来提交，解决了大部分的冲突问题。Leader选举时产生冲突怎么办？参考raft，每次prepare后失败，随机等待一段时间。</li>
+</ul>
+</li>
+<li>Proposal ID需要全局唯一吗？<ul>
+<li>首先：<strong>paxos要求propose阶段的id是全局唯一，但不要求prepare阶段的id全局唯一</strong>。<br>首先是原文，“All that remains is to describe the mechanism for guaranteeing that no two proposals are ever issued with the same number.”<br>其中的关键词是“proposal”以及“issued”。一个proposer只有在进入accept阶段之后才可以“issue a proposal”，换句话讲，lamport根本没有要求过proposer在prepare阶段发出的id要全局唯一。<br>应该保证acceptor接收到proposal的时候，number是唯一的，但这显然和prepare阶段没有关系。<br>当然，最显而易见的方式，就是在prepare阶段的时候就保证prepare id唯一，然后由于accept阶段时的proposal id就是成功后的prepare id，那么proposal id就自然符合条件了，但这是充分非必要的。</li>
+<li>prepare阶段id重复<strong>不会</strong>传递到propose阶段，条件是Acceptor在<strong>promise</strong>时<strong>拒绝</strong>小于<strong>等于</strong>当前持久化的minProposal。<br>分析：如果一个proposer1想要发起phase2 with number n，那么他需要获得majority的phase1的结果。<br>如果另一个proposer2想要发起phase2 with number n，他也需要获得majority的phase1的结果。<br>这两个majority一定有交集，交集中的acceptor不可能同时接受proposer1和proposer2的prepare request：因为phase1b只允许他答应其中一个。<br>因此这两个proposer在phase2发出的proposal不可能具有相同的n，因此paxos一开始的number全局唯一number是不必要的，只需要每个proposer本地的number唯一就好。</li>
+<li>这里容易混淆的地方是很多文章写的是prepare阶段拒绝小于minProposal的请求（也就是接受n==minProposal的请求）。如果这样的话，就需要全局唯一的Proposal ID了。</li>
+<li>怎样获得全局唯一的Proposal ID？<ul>
+<li>物理时间戳+ip：存疑。物理时间可能回调，导致生成两个相同的时间戳，全局不唯一</li>
+<li>本地递增自然数+ip：即使前面重复了，ip也能确保不重复</li>
+</ul>
+</li>
+</ul>
+</li>
+</ol>
+<h2 id="Multi-Paxos"><a href="#Multi-Paxos" class="headerlink" title="Multi-Paxos"></a>Multi-Paxos</h2><p>参考文章：</p>
+<ul>
+<li><a href="https://zhuanlan.zhihu.com/p/20417442">[Paxos三部曲之二] 使用Multi-Paxos协议的日志同步与恢复 作者：郁白</a></li>
+<li><a href="https://zhuanlan.zhihu.com/p/20742144">[Paxos三部曲之三] Paxos成员组变更 作者：郁白</a></li>
+<li><a href="https://www.cnblogs.com/foxmailed/p/5487533.html">使用multi-paxos实现日志同步应用 作者：吴镝</a></li>
+</ul>
+<p>在Paxos集群中利用Paxos协议选举唯一的leader，只有leader能够propose日志,这样，prepare阶段就不会存在冲突，相当于对整个log文件做了一次prepare，后面这些日志都可以选用同一个proposal id.这样的话，每条日志只需要一次网络交互就能达成一致。回顾一下文章开头提到paxos中需要每个成员需要记录3个值，minProposal，acceptedProposal,acceptedValue，其中后面两个值可以直接记录在log中，而第一个值minProposal可以单独存在一个文件中。由于这里后面的日志都可以选用同一个proposal id，显然，在大部分时间内，minProposal都不需要改变。这正是multi-paxos的精髓。</p>
+<h3 id="选主"><a href="#选主" class="headerlink" title="选主"></a>选主</h3><p>对于paxos来说，主的身份无所谓，主不需要像raft那样拥有最全的已经commit的日志。所以选主算法无所谓，比如大家都给机器ip最大的机器投票，或者给日志最多的投票，或者干脆直接运行一次paxos。</p>
+<p>在Multi-Paxos中，我们将leader Elect过程中的prepare操作，视为对leader任期内将要写的所有日志的一次性prepare操作，在leader任期内投票的所有日志将携带有相同的proposalID。需要强调的是，为了遵守Basic-Paxos协议约束，在leader Elect的prepare阶段，acceptor应答prepare成功的消息之前要先将这次prepare请求所携带的proposalID持久化到本地。</p>
+<p>对于leader Elect过程，我们并不关心leader Elect提案和决议的具体内容，因为无论执行多少次leader Elect，从Basic-Paxos的角度来看，都是同一个Paxos Instance在对已经形成的决议反复进行投票而已。而执行leader Elect这个过程，我们最关注的是要得到最近一次形成决议的proposer是谁，以及它的proposalID。在leader Elect过程中，得到多数派accept的proposer将成为leader，而它本次所用的proposalID即成为它任期内对所有日志（包括新增日志和后文将提到的重确认日志）进行投票时将要使用的proposalID（称为leader ProposalID）。</p>
+<p>这里还需要考虑的一个问题是，由于多个server并发执行leader Elect，可能出现两个server在相近的时间内，先后执行leader Elect都成功，都认为自己是leader的情况。因此，当选leader在开始以leader身份提供服务之前，要使用leader ProposalID写一条日志（称为StartWorking日志），得到多数派确认后，再开始提供服务。这是因为根据Basic-Paxos的约束，可以推断出：先执行leader Elect成功的leader（称为L1），它的proposalID（称为P1）一定会小于后执行leader Elect成功的leader（称为L2）的proposalID（称为P2），而经过了两轮leader Elect，机群内多数派持久化的proposalID一定是P2，而此时L1使用P1执行accept时，由于P1 &lt; P2，它将无法得到机群内多数派的accept。</p>
+<h3 id="Confirm日志的优化"><a href="#Confirm日志的优化" class="headerlink" title="Confirm日志的优化"></a>Confirm日志的优化</h3><p>在Paxos协议中，对于决议的读取也是需要执行一轮Paxos过程的，在实际工程中做数据恢复时，对每条日志都执行一轮Paxos的代价过大，因此引入需要引入一种被成为confirm的机制，即leader持久化一条日志，得到多数派的accept后，就再写一条针对这条日志的confirm日志，表示这条日志已经确认形成了多数派备份，在回放日志时，判断如果一条日志有对应的confirm日志，则可以直接读取本地内容，而不需要再执行一轮Paxos。confirm日志只要写本地即可，不需要同步到备机，但是出于提示备机及时回放收到日志的考虑（备机收到一条日志后并不能立即回放，需要确认这条日志已经形成多数派备份才能回放），leader也会批量的给备机同步confirm日志。出于性能的考虑，confirm日志往往是延迟的成批写出去，因此仍然会出现部分日志已经形成多数派备份，但是没有对应的confirm日志的情况，对于这些日志，需要在恢复过程中进行重确认。</p>
+<p>在实际的工程实践中，可以使用基于logID的滑动窗口机制来限制confirm日志与对应的原始日志的距离，以简化日志回放与查询逻辑。</p>
+<h3 id="新任leader对日志的重确认"><a href="#新任leader对日志的重确认" class="headerlink" title="新任leader对日志的重确认"></a>新任leader对日志的重确认</h3><p>如上一节所述，在恢复过程中，拥有对应confirm日志的原始日志，可以被直接回放。而没有对应confirm日志的原始日志，则需要执行一轮Paxos，这个过程被成为重确认。</p>
+<p>此外日志中的“空洞”，也需要进行重确认，因为当前leader再上一任leader的任期内可能错过了一些日志的同步，而这些日志在其他机器上形成多了多数派。由于logID连续递增，被错过的日志就成了连续logID连续递增序列中的“空洞”，需要通过重确认来补全这些“空洞”位置的日志。</p>
+<p>新任leader在开始执行重确认前，需要先知道重确认的结束位置，因为leader本地相对于集群内多数派可能已经落后很多日志，所以需要想集群内其他server发送请求，查询每个server本地的最大logID，并从多数派的应答中选择最大的logID作为重确认的结束位置。也即开始提供服务后写日志的起始logID-1。</p>
+<p>对于每条日志的重确认，需要执行一轮完整的Paxos过程，可能有些日志在恢复前确实未形成多数派备份，需要通过重新执行Paxos来把这些日志重新持久化才能回放。这种不管日志是否曾经形成多数派备份，都重新尝试持久化的原则，我们称之为“最大commit原则”。之所以要遵守“最大commit原则”，是因为我们无法区分出来未形成多数派备份的日志，而这些日志在上一任leader任期内，也必然是“未决”状态，尚未应答客户端，所以无论如何都重新持久化都是安全的。比如A/B/C三个server，一条日志在A/B上持久化成功，已经形成多数派，然后B宕机；另一种情况，A/B/C三个server，一条日志只在A上持久化成功，超时未形成多数派，然后B宕机。上述两种情况，最终的状态都是A上有一条日志，C上没有，在恢复时无法区分这条日志是否曾经形成过多数派，因此干脆按照“最大commit原则”将这条日志尝试重新在A/C上持久化后再回放。</p>
+<p>需要注意的是，重确认日志时，要使用当前的leader ProposalID作为Paxos协议中的proposalID来对日志执行Paxos过程。因此在回放日志时，对于logID相同的多条日志，要以proposalID最大的为准。</p>
+<h3 id="“幽灵复现”日志的处理"><a href="#“幽灵复现”日志的处理" class="headerlink" title="“幽灵复现”日志的处理"></a>“幽灵复现”日志的处理</h3><p>使用Paxos协议处理日志的备份与恢复，可以保证确认形成多数派的日志不丢失，但是无法避免一种被称为“幽灵复现”的现象，如下图所示：</p>
+<p><img src="../_pic/ghost.png" alt="幽灵复现"></p>
+<ol>
+<li><p>第一轮中A被选为Leader，写下了1-10号日志，其中1-5号日志形成了多数派，并且已给客户端应答，而对于6-10号日志，客户端超时未能得到应答。</p>
+</li>
+<li><p>第二轮，A宕机，B被选为Leader，由于B和C的最大的logID都是5，因此B不会去重确认6-10号日志，而是从6开始写新的日志，此时如果客户端来查询的话，是查询不到6-10号日志内容的，此后第二轮又写入了6-20号日志，但是只有6号和20号日志在多数派上持久化成功。</p>
+</li>
+<li><p>第三轮，A又被选为Leader，从多数派中可以得到最大logID为20，因此要将7-20号日志执行重确认，其中就包括了A上的7-10号日志，之后客户端再来查询的话，会发现上次查询不到的7-10号日志又像幽灵一样重新出现了。</p>
+</li>
+</ol>
+<p>对于将Paxos协议应用在数据库日志同步场景的情况，“幽灵复现”问题是不可接受，一个简单的例子就是转账场景，用户转账时如果返回结果超时，那么往往会查询一下转账是否成功，来决定是否重试一下。如果第一次查询转账结果时，发现未生效而重试，而转账事务日志作为幽灵复现日志重新出现的话，就造成了用户重复转账。</p>
+<p>为了处理“幽灵复现”问题，我们在每条日志的内容中保存一个generateID，leader在生成这条日志时以当前的leader ProposalID作为generateID。按logID顺序回放日志时，因为leader在开始服务之前一定会写一条StartWorking日志，所以如果出现generateID相对前一条日志变小的情况，说明这是一条“幽灵复现”日志（它的generateID会小于StartWorking日志），要忽略掉这条日志。</p>
+<p>幽灵复现问题只会出现在持久化的log后的leader未与majority达成一致的尾巴部分，不会出现在空洞部分。因为第二阶段的leader重确认时会将空洞补上，但不会将尾巴补上。</p>
+<p>raft同样存在幽灵复现问题，通过no-op机制解决。本质上no-op和startWorking日志是一样的。</p>
+]]></content>
+      <tags>
+        <tag>Paxos</tag>
+      </tags>
+  </entry>
+  <entry>
+    <title>算法题-易忘点</title>
+    <url>/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/</url>
+    <content><![CDATA[<h1 id="算法题-易忘点"><a href="#算法题-易忘点" class="headerlink" title="算法题-易忘点"></a>算法题-易忘点</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文收录我在刷算法题时常用常忘的一些知识点，包含但不限于算法套路、STL使用等。长期更新</p>
+<h2 id="STL使用"><a href="#STL使用" class="headerlink" title="STL使用"></a>STL使用</h2><h3 id="stack"><a href="#stack" class="headerlink" title="stack"></a>stack</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++stack.jpeg" alt="stack"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::stack&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word = words.<span class="built_in">top</span>();</span><br><span class="line">words.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
+<h3 id="queue"><a href="#queue" class="headerlink" title="queue"></a>queue</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++queue.jpeg" alt="queue"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::queue&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word=words.<span class="built_in">front</span>();</span><br><span class="line">word=words.<span class="built_in">back</span>();</span><br><span class="line">word.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
+
+<h2 id="二分查找"><a href="#二分查找" class="headerlink" title="二分查找"></a>二分查找</h2><h3 id="lower-bound-和-upper-bound"><a href="#lower-bound-和-upper-bound" class="headerlink" title="lower_bound 和 upper_bound"></a>lower_bound 和 upper_bound</h3><p>c++的algorithm头文件</p>
+<ul>
+<li>lower_bound:找到 <strong>大于等于</strong>目标元素 的下标。找到的是<strong>第一个</strong>可插入的位置，所以是lower。</li>
+<li>upper_bound:找到 <strong>大于</strong>目标元素 的下标。找到的是<strong>最后一个</strong>可插入的位置，所以是upper。</li>
+</ul>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="built_in">sort</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());<span class="comment">//进行二分之前需要排序</span></span><br><span class="line"><span class="keyword">int</span> pos = <span class="built_in">lower_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>()) - vec.<span class="built_in">begin</span>();  </span><br><span class="line"><span class="keyword">int</span> num = *<span class="built_in">upper_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());</span><br></pre></td></tr></table></figure>
+
+<h3 id="二分查找的实现"><a href="#二分查找的实现" class="headerlink" title="二分查找的实现"></a>二分查找的实现</h3><p><a href="https://zhuanlan.zhihu.com/p/343138037">聊聊一看就会一写就跪的二分查找</a></p>
+<p>此文将所有二分查找问题变种抽象为一个基本问题</p>
+<blockquote>
+<p>在一个左边全是 false 右边全是 true 的数组中，有且只有一个从 false 突变为 true 的点，二分查找其实就是要找到这个突变点。</p>
+</blockquote>
+<p><img src="../_pic/binarySearch1.png" alt="binarySearch1"></p>
+<p><img src="../_pic/binarySearch2.png" alt="binarySearch2"></p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="function">func <span class="title">BSearch</span><span class="params">(l, r <span class="keyword">int</span>, f func(<span class="keyword">int</span>) <span class="keyword">bool</span>)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">for</span> l &lt; r &#123;</span><br><span class="line">        <span class="comment">// 注意这里是为了避免溢出</span></span><br><span class="line">        m := l + (r - l) / <span class="number">2</span></span><br><span class="line">        <span class="keyword">if</span> !<span class="built_in">f</span>(m) &#123;</span><br><span class="line">            l = m + <span class="number">1</span></span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            r = m</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> l</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>核心就是想办法把问题转化成基本问题中的布尔数组。</p>
+<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line"><span class="function">func <span class="title">FirstGtInAsc</span><span class="params">(array []string, target string)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+]]></content>
+      <tags>
+        <tag>算法题</tag>
+      </tags>
+  </entry>
+  <entry>
     <title>DDIA第五章-数据复制笔记</title>
     <url>/2021/11/29/DDIA%E7%AC%AC%E4%BA%94%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%A4%8D%E5%88%B6%E7%AC%94%E8%AE%B0/</url>
     <content><![CDATA[<h1 id="DDIA第五章-数据复制-笔记"><a href="#DDIA第五章-数据复制-笔记" class="headerlink" title="DDIA第五章-数据复制 笔记"></a>DDIA第五章-数据复制 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>多副本技术主要服务于以下目的：</p>
@@ -206,167 +381,6 @@
 <h3 id="检测并发写（处理写冲突）"><a href="#检测并发写（处理写冲突）" class="headerlink" title="检测并发写（处理写冲突）"></a>检测并发写（处理写冲突）</h3><h4 id="最后写入者获胜（last-write-wins，LWW）"><a href="#最后写入者获胜（last-write-wins，LWW）" class="headerlink" title="最后写入者获胜（last write wins，LWW）"></a>最后写入者获胜（last write wins，LWW）</h4><p>为每个写请求附加一个时间戳，选择最新的时间戳，丢弃较早时间戳的写入。LWW会删除非并发写（因为时钟同步问题，第8章）。</p>
 <h4 id="版本矢量"><a href="#版本矢量" class="headerlink" title="版本矢量"></a>版本矢量</h4><p>DDIA讲得太少了，有空补一下。</p>
 ]]></content>
-  </entry>
-  <entry>
-    <title>DDIA第七章-事务笔记</title>
-    <url>/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/</url>
-    <content><![CDATA[<h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
-<ul>
-<li>《数据库系统概念-第七版》第17、18章</li>
-<li><a href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
-<li><a href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
-</ul>
-<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
-<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
-<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
-<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
-<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
-</ul>
-<p>下面的内容都是关于Isolation的。</p>
-<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
-<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
-<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏读。</li>
-<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
-<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
-<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
-<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。</li>
-</ul>
-<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。</p>
-<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
-<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
-<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
-</ul>
-<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
-<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
-<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
-<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
-<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
-</ul>
-<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
-<p>谓词锁会限制如下访问：</p>
-<ul>
-<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
-<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
-</ul>
-<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
-]]></content>
-      <tags>
-        <tag>DDIA</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>Paxos 笔记</title>
-    <url>/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/</url>
-    <content><![CDATA[<h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
-<ul>
-<li><a href="https://zhuanlan.zhihu.com/p/31780743">Paxos算法详解 作者：祥光</a></li>
-<li><a href="https://ying-zhang.github.io/dist/2001-paxos_made_simple-cn/">paxos made simple译文 作者：张营</a></li>
-<li><a href="https://zhuanlan.zhihu.com/p/258929773">PAXOS Paxos Made Simp阅读笔记 作者：不想说</a></li>
-<li><a href="http://oceanbase.org.cn/?p=90">[Paxos三部曲之一] 使用Basic-Paxos协议的日志同步与恢复 作者：郁白</a></li>
-</ul>
-<p>Paxos算法通过一个决议分为两个阶段（Learn阶段之前决议已经形成）：</p>
-<ul>
-<li>第一阶段：Prepare阶段。Proposer向Acceptors发出Prepare请求，Acceptors针对收到的Prepare请求进行Promise承诺。</li>
-<li>第二阶段：Accept阶段。Proposer收到多数Acceptors承诺的Promise后，向Acceptors发出Propose请求，Acceptors针对收到的Propose请求进行Accept处理。</li>
-<li>第三阶段：Learn阶段。Proposer在收到多数Acceptors的Accept之后，标志着本次Accept成功，决议形成，将形成的决议发送给所有Learners。</li>
-</ul>
-<p>Paxos算法流程中的每条消息描述如下：</p>
-<p><strong>Prepare</strong>: Proposer生成全局唯一且递增的Proposal ID (可使用时间戳加Server ID)，向所有Acceptors发送Prepare请求，这里无需携带提案内容，只携带Proposal ID即可。<br><strong>Promise</strong>: Acceptors收到Prepare请求后，做出“两个承诺，一个应答”。<br>两个承诺：</p>
-<ol>
-<li><p>不再接受Proposal ID小于等于（注意：这里是&lt;= ）当前请求的Prepare请求。</p>
-</li>
-<li><p>不再接受Proposal ID小于（注意：这里是&lt; ）当前请求的Propose请求。</p>
-</li>
-</ol>
-<p>一个应答：</p>
-<p>不违背以前作出的承诺下，回复已经Accept过的提案中Proposal ID最大的那个提案的Value和Proposal ID，没有则返回空值。</p>
-<p><strong>Propose</strong>: Proposer 收到多数Acceptors的Promise应答后，从应答中选择Proposal ID最大的提案的Value，作为本次要发起的提案。如果所有应答的提案Value均为空值，则可以自己随意决定提案Value。然后携带当前Proposal ID，向所有Acceptors发送Propose请求。</p>
-<p><strong>Accept</strong>: Acceptor收到Propose请求后，在不违背自己之前作出的承诺下，接受并持久化当前Proposal ID和提案Value。<br>Learn: Proposer收到多数Acceptors的Accept后，决议形成，将形成的决议发送给所有Learners。</p>
-<p>Paxos算法伪代码描述如下：</p>
-<p><img src="../_pic/basic_paxos_pseudocode.jpeg" alt="basic_paxos_Pseudocode"></p>
-<ol>
-<li>获取一个Proposal ID n，为了保证Proposal ID唯一，可采用时间戳+Server ID生成；(其实不需要唯一，见下方讨论)</li>
-<li>Proposer向所有Acceptors广播Prepare(n)请求；</li>
-<li>Acceptor比较n和minProposal，如果n&gt;minProposal，minProposal=n，并且将 acceptedProposal 和 acceptedValue 返回；</li>
-<li>Proposer接收到过半数回复后，如果发现有acceptedValue返回，将所有回复中acceptedProposal最大的acceptedValue作为本次提案的value，否则可以任意决定本次提案的value；</li>
-<li>到这里可以进入第二阶段，广播Accept (n,value) 到所有节点；</li>
-<li>Acceptor比较n和minProposal，如果n&gt;=minProposal，则acceptedProposal=minProposal=n，acceptedValue=value，本地持久化后，返回；否则，返回minProposal。</li>
-<li>提议者接收到过半数请求后，如果发现有返回值result &gt;n，表示有更新的提议，跳转到1；否则value达成一致。</li>
-</ol>
-<p>值得注意的点：</p>
-<ol>
-<li>paxos有活锁问题吗，怎么解决？<ul>
-<li>有。两个Proposer因为自己的Proposal ID过低，不断增加ID，你编号高，我再比你更高，反复如此，算法永远无法结束。</li>
-<li>解决方法：multi-paxos通过选举出一个Proposer作Leader，所有的Proposal都通过Leader来提交，解决了大部分的冲突问题。Leader选举时产生冲突怎么办？参考raft，每次prepare后失败，随机等待一段时间。</li>
-</ul>
-</li>
-<li>Proposal ID需要全局唯一吗？<ul>
-<li>首先：<strong>paxos要求propose阶段的id是全局唯一，但不要求prepare阶段的id全局唯一</strong>。<br>首先是原文，“All that remains is to describe the mechanism for guaranteeing that no two proposals are ever issued with the same number.”<br>其中的关键词是“proposal”以及“issued”。一个proposer只有在进入accept阶段之后才可以“issue a proposal”，换句话讲，lamport根本没有要求过proposer在prepare阶段发出的id要全局唯一。<br>应该保证acceptor接收到proposal的时候，number是唯一的，但这显然和prepare阶段没有关系。<br>当然，最显而易见的方式，就是在prepare阶段的时候就保证prepare id唯一，然后由于accept阶段时的proposal id就是成功后的prepare id，那么proposal id就自然符合条件了，但这是充分非必要的。</li>
-<li>prepare阶段id重复<strong>不会</strong>传递到propose阶段，条件是Acceptor在<strong>promise</strong>时<strong>拒绝</strong>小于<strong>等于</strong>当前持久化的minProposal。<br>分析：如果一个proposer1想要发起phase2 with number n，那么他需要获得majority的phase1的结果。<br>如果另一个proposer2想要发起phase2 with number n，他也需要获得majority的phase1的结果。<br>这两个majority一定有交集，交集中的acceptor不可能同时接受proposer1和proposer2的prepare request：因为phase1b只允许他答应其中一个。<br>因此这两个proposer在phase2发出的proposal不可能具有相同的n，因此paxos一开始的number全局唯一number是不必要的，只需要每个proposer本地的number唯一就好。</li>
-<li>这里容易混淆的地方是很多文章写的是prepare阶段拒绝小于minProposal的请求（也就是接受n==minProposal的请求）。如果这样的话，就需要全局唯一的Proposal ID了。</li>
-<li>怎样获得全局唯一的Proposal ID？<ul>
-<li>物理时间戳+ip：存疑。物理时间可能回调，导致生成两个相同的时间戳，全局不唯一</li>
-<li>本地递增自然数+ip：即使前面重复了，ip也能确保不重复</li>
-</ul>
-</li>
-</ul>
-</li>
-</ol>
-<h2 id="Multi-Paxos"><a href="#Multi-Paxos" class="headerlink" title="Multi-Paxos"></a>Multi-Paxos</h2><p>参考文章：</p>
-<ul>
-<li><a href="https://zhuanlan.zhihu.com/p/20417442">[Paxos三部曲之二] 使用Multi-Paxos协议的日志同步与恢复 作者：郁白</a></li>
-<li><a href="https://zhuanlan.zhihu.com/p/20742144">[Paxos三部曲之三] Paxos成员组变更 作者：郁白</a></li>
-<li><a href="https://www.cnblogs.com/foxmailed/p/5487533.html">使用multi-paxos实现日志同步应用 作者：吴镝</a></li>
-</ul>
-<p>在Paxos集群中利用Paxos协议选举唯一的leader，只有leader能够propose日志,这样，prepare阶段就不会存在冲突，相当于对整个log文件做了一次prepare，后面这些日志都可以选用同一个proposal id.这样的话，每条日志只需要一次网络交互就能达成一致。回顾一下文章开头提到paxos中需要每个成员需要记录3个值，minProposal，acceptedProposal,acceptedValue，其中后面两个值可以直接记录在log中，而第一个值minProposal可以单独存在一个文件中。由于这里后面的日志都可以选用同一个proposal id，显然，在大部分时间内，minProposal都不需要改变。这正是multi-paxos的精髓。</p>
-<h3 id="选主"><a href="#选主" class="headerlink" title="选主"></a>选主</h3><p>对于paxos来说，主的身份无所谓，主不需要像raft那样拥有最全的已经commit的日志。所以选主算法无所谓，比如大家都给机器ip最大的机器投票，或者给日志最多的投票，或者干脆直接运行一次paxos。</p>
-<p>在Multi-Paxos中，我们将leader Elect过程中的prepare操作，视为对leader任期内将要写的所有日志的一次性prepare操作，在leader任期内投票的所有日志将携带有相同的proposalID。需要强调的是，为了遵守Basic-Paxos协议约束，在leader Elect的prepare阶段，acceptor应答prepare成功的消息之前要先将这次prepare请求所携带的proposalID持久化到本地。</p>
-<p>对于leader Elect过程，我们并不关心leader Elect提案和决议的具体内容，因为无论执行多少次leader Elect，从Basic-Paxos的角度来看，都是同一个Paxos Instance在对已经形成的决议反复进行投票而已。而执行leader Elect这个过程，我们最关注的是要得到最近一次形成决议的proposer是谁，以及它的proposalID。在leader Elect过程中，得到多数派accept的proposer将成为leader，而它本次所用的proposalID即成为它任期内对所有日志（包括新增日志和后文将提到的重确认日志）进行投票时将要使用的proposalID（称为leader ProposalID）。</p>
-<p>这里还需要考虑的一个问题是，由于多个server并发执行leader Elect，可能出现两个server在相近的时间内，先后执行leader Elect都成功，都认为自己是leader的情况。因此，当选leader在开始以leader身份提供服务之前，要使用leader ProposalID写一条日志（称为StartWorking日志），得到多数派确认后，再开始提供服务。这是因为根据Basic-Paxos的约束，可以推断出：先执行leader Elect成功的leader（称为L1），它的proposalID（称为P1）一定会小于后执行leader Elect成功的leader（称为L2）的proposalID（称为P2），而经过了两轮leader Elect，机群内多数派持久化的proposalID一定是P2，而此时L1使用P1执行accept时，由于P1 &lt; P2，它将无法得到机群内多数派的accept。</p>
-<h3 id="Confirm日志的优化"><a href="#Confirm日志的优化" class="headerlink" title="Confirm日志的优化"></a>Confirm日志的优化</h3><p>在Paxos协议中，对于决议的读取也是需要执行一轮Paxos过程的，在实际工程中做数据恢复时，对每条日志都执行一轮Paxos的代价过大，因此引入需要引入一种被成为confirm的机制，即leader持久化一条日志，得到多数派的accept后，就再写一条针对这条日志的confirm日志，表示这条日志已经确认形成了多数派备份，在回放日志时，判断如果一条日志有对应的confirm日志，则可以直接读取本地内容，而不需要再执行一轮Paxos。confirm日志只要写本地即可，不需要同步到备机，但是出于提示备机及时回放收到日志的考虑（备机收到一条日志后并不能立即回放，需要确认这条日志已经形成多数派备份才能回放），leader也会批量的给备机同步confirm日志。出于性能的考虑，confirm日志往往是延迟的成批写出去，因此仍然会出现部分日志已经形成多数派备份，但是没有对应的confirm日志的情况，对于这些日志，需要在恢复过程中进行重确认。</p>
-<p>在实际的工程实践中，可以使用基于logID的滑动窗口机制来限制confirm日志与对应的原始日志的距离，以简化日志回放与查询逻辑。</p>
-<h3 id="新任leader对日志的重确认"><a href="#新任leader对日志的重确认" class="headerlink" title="新任leader对日志的重确认"></a>新任leader对日志的重确认</h3><p>如上一节所述，在恢复过程中，拥有对应confirm日志的原始日志，可以被直接回放。而没有对应confirm日志的原始日志，则需要执行一轮Paxos，这个过程被成为重确认。</p>
-<p>此外日志中的“空洞”，也需要进行重确认，因为当前leader再上一任leader的任期内可能错过了一些日志的同步，而这些日志在其他机器上形成多了多数派。由于logID连续递增，被错过的日志就成了连续logID连续递增序列中的“空洞”，需要通过重确认来补全这些“空洞”位置的日志。</p>
-<p>新任leader在开始执行重确认前，需要先知道重确认的结束位置，因为leader本地相对于集群内多数派可能已经落后很多日志，所以需要想集群内其他server发送请求，查询每个server本地的最大logID，并从多数派的应答中选择最大的logID作为重确认的结束位置。也即开始提供服务后写日志的起始logID。</p>
-<p>对于每条日志的重确认，需要执行一轮完整的Paxos过程，可能有些日志在恢复前确实未形成多数派备份，需要通过重新执行Paxos来把这些日志重新持久化才能回放。这种不管日志是否曾经形成多数派备份，都重新尝试持久化的原则，我们称之为“最大commit原则”。之所以要遵守“最大commit原则”，是因为我们无法区分出来未形成多数派备份的日志，而这些日志在上一任leader任期内，也必然是“未决”状态，尚未应答客户端，所以无论如何都重新持久化都是安全的。比如A/B/C三个server，一条日志在A/B上持久化成功，已经形成多数派，然后B宕机；另一种情况，A/B/C三个server，一条日志只在A上持久化成功，超时未形成多数派，然后B宕机。上述两种情况，最终的状态都是A上有一条日志，C上没有，在恢复时无法区分这条日志是否曾经形成过多数派，因此干脆按照“最大commit原则”将这条日志尝试重新在A/C上持久化后再回放。</p>
-<p>需要注意的是，重确认日志时，要使用当前的leader ProposalID作为Paxos协议中的proposalID来对日志执行Paxos过程。因此在回放日志时，对于logID相同的多条日志，要以proposalID最大的为准。</p>
-]]></content>
-      <tags>
-        <tag>Paxos</tag>
-      </tags>
-  </entry>
-  <entry>
-    <title>算法题-易忘点</title>
-    <url>/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/</url>
-    <content><![CDATA[<h1 id="算法题-易忘点"><a href="#算法题-易忘点" class="headerlink" title="算法题-易忘点"></a>算法题-易忘点</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文收录我在刷算法题时常用常忘的一些知识点，包含但不限于算法套路、STL使用等。长期更新</p>
-<h2 id="STL使用"><a href="#STL使用" class="headerlink" title="STL使用"></a>STL使用</h2><h3 id="stack"><a href="#stack" class="headerlink" title="stack"></a>stack</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++stack.jpeg" alt="stack"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::stack&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word = words.<span class="built_in">top</span>();</span><br><span class="line">words.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
-
-<h3 id="queue"><a href="#queue" class="headerlink" title="queue"></a>queue</h3><p><img src="https://github.com/sWildGold/sWildGold.github.io/tree/master/source/_pic/c++queue.jpeg" alt="queue"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line">std::queue&lt;std::string&gt; words;</span><br><span class="line">words.<span class="built_in">push</span>(std::<span class="built_in">string</span>(<span class="string">&quot;word&quot;</span>));</span><br><span class="line">std::string word=words.<span class="built_in">front</span>();</span><br><span class="line">word=words.<span class="built_in">back</span>();</span><br><span class="line">word.<span class="built_in">pop</span>();</span><br><span class="line"><span class="keyword">int</span> size = words.<span class="built_in">size</span>();</span><br><span class="line"><span class="keyword">bool</span> isEmpty = words.<span class="built_in">empty</span>();</span><br></pre></td></tr></table></figure>
-
-<h2 id="二分查找"><a href="#二分查找" class="headerlink" title="二分查找"></a>二分查找</h2><h3 id="lower-bound-和-upper-bound"><a href="#lower-bound-和-upper-bound" class="headerlink" title="lower_bound 和 upper_bound"></a>lower_bound 和 upper_bound</h3><p>c++的algorithm头文件</p>
-<ul>
-<li>lower_bound:找到 <strong>大于等于</strong>目标元素 的下标。找到的是<strong>第一个</strong>可插入的位置，所以是lower。</li>
-<li>upper_bound:找到 <strong>大于</strong>目标元素 的下标。找到的是<strong>最后一个</strong>可插入的位置，所以是upper。</li>
-</ul>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="built_in">sort</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());<span class="comment">//进行二分之前需要排序</span></span><br><span class="line"><span class="keyword">int</span> pos = <span class="built_in">lower_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>()) - vec.<span class="built_in">begin</span>();  </span><br><span class="line"><span class="keyword">int</span> num = *<span class="built_in">upper_bound</span>(vec.<span class="built_in">begin</span>(),vec.<span class="built_in">end</span>());</span><br></pre></td></tr></table></figure>
-
-<h3 id="二分查找的实现"><a href="#二分查找的实现" class="headerlink" title="二分查找的实现"></a>二分查找的实现</h3><p><a href="https://zhuanlan.zhihu.com/p/343138037">聊聊一看就会一写就跪的二分查找</a></p>
-<p>此文将所有二分查找问题变种抽象为一个基本问题</p>
-<blockquote>
-<p>在一个左边全是 false 右边全是 true 的数组中，有且只有一个从 false 突变为 true 的点，二分查找其实就是要找到这个突变点。</p>
-</blockquote>
-<p><img src="../_pic/binarySearch1.png" alt="binarySearch1"></p>
-<p><img src="../_pic/binarySearch2.png" alt="binarySearch2"></p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="function">func <span class="title">BSearch</span><span class="params">(l, r <span class="keyword">int</span>, f func(<span class="keyword">int</span>) <span class="keyword">bool</span>)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">for</span> l &lt; r &#123;</span><br><span class="line">        <span class="comment">// 注意这里是为了避免溢出</span></span><br><span class="line">        m := l + (r - l) / <span class="number">2</span></span><br><span class="line">        <span class="keyword">if</span> !<span class="built_in">f</span>(m) &#123;</span><br><span class="line">            l = m + <span class="number">1</span></span><br><span class="line">        &#125; <span class="keyword">else</span> &#123;</span><br><span class="line">            r = m</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">    <span class="keyword">return</span> l</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-
-<p>核心就是想办法把问题转化成基本问题中的布尔数组。</p>
-<figure class="highlight c++"><table><tr><td class="code"><pre><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line"><span class="function">func <span class="title">FirstGtInAsc</span><span class="params">(array []string, target string)</span> <span class="keyword">int</span> </span>&#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回第一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递增，返回最后一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &gt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回第一个小于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 len(array) 即可。</span></span><br><span class="line">func <span class="built_in">FirstLteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;)</span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于等于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGtInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt; target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br><span class="line"></span><br><span class="line"><span class="comment">// 问题: array 非严格递减，返回最后一个大于 target 的元素下标。</span></span><br><span class="line"><span class="comment">// 补充: 如果查找不到合法结果，则返回 -1 即可。</span></span><br><span class="line">func <span class="built_in">LastGteInAsc</span>(array []string, target string) <span class="keyword">int</span> &#123;</span><br><span class="line">    <span class="keyword">return</span> <span class="built_in">BSearch</span>(<span class="number">0</span>, <span class="built_in">len</span>(array), <span class="built_in">func</span>(x <span class="keyword">int</span>) <span class="keyword">bool</span> &#123;</span><br><span class="line">        <span class="keyword">return</span> array[x] &lt;= target</span><br><span class="line">    &#125;) - <span class="number">1</span></span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
-]]></content>
-      <tags>
-        <tag>算法题</tag>
-      </tags>
   </entry>
   <entry>
     <title>Hello World</title>
