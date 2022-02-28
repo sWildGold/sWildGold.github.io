@@ -82,7 +82,7 @@
         <span class="post-meta-item-icon">
             <i class="ri-quill-pen-line"></i>
             <span class="post-meta-item-text"> Word count:</span>
-            <span class="post-count">3.8k</span>
+            <span class="post-count">5k</span>
         </span>
     </span>
 
@@ -91,7 +91,7 @@
         <span class="post-meta-item-icon">
             <i class="ri-book-open-line"></i>
             <span class="post-meta-item-text"> Reading time≈</span>
-            <span class="post-count">13 min</span>
+            <span class="post-count">17 min</span>
         </span>
     </span>
 </div>
@@ -106,7 +106,8 @@
   
     <div class="article-entry" itemprop="articleBody">
        
-  <h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
+  <h1 id="Paxos-笔记"><a href="#Paxos-笔记" class="headerlink" title="Paxos 笔记"></a>Paxos 笔记</h1><p><a target="_blank" rel="noopener" href="https://www.zhihu.com/question/36648084/answer/82332860">raft和paxos比较 作者：朱一聪</a></p>
+<h2 id="Basic-Paxos"><a href="#Basic-Paxos" class="headerlink" title="Basic-Paxos"></a>Basic-Paxos</h2><p>参考文章：</p>
 <ul>
 <li><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/31780743">Paxos算法详解 作者：祥光</a></li>
 <li><a target="_blank" rel="noopener" href="https://ying-zhang.github.io/dist/2001-paxos_made_simple-cn/">paxos made simple译文 作者：张营</a></li>
@@ -132,7 +133,7 @@
 <p><strong>Propose</strong>: Proposer 收到多数Acceptors的Promise应答后，从应答中选择Proposal ID最大的提案的Value，作为本次要发起的提案。如果所有应答的提案Value均为空值，则可以自己随意决定提案Value。然后携带当前Proposal ID，向所有Acceptors发送Propose请求。</p>
 <p><strong>Accept</strong>: Acceptor收到Propose请求后，在不违背自己之前作出的承诺下，接受并持久化当前Proposal ID和提案Value。<br>Learn: Proposer收到多数Acceptors的Accept后，决议形成，将形成的决议发送给所有Learners。</p>
 <p>Paxos算法伪代码描述如下：</p>
-<p><img src="../_pic/basic_paxos_pseudocode.jpeg" alt="basic_paxos_Pseudocode"></p>
+<p><img src="https://pic2.zhimg.com/80/v2-8d4eaf5fdeb145e8bdf5e3bb1af408c9_1440w.jpg" alt="basic_paxos_Pseudocode"></p>
 <ol>
 <li>获取一个Proposal ID n，为了保证Proposal ID唯一，可采用时间戳+Server ID生成；(其实不需要唯一，见下方讨论)</li>
 <li>Proposer向所有Acceptors广播Prepare(n)请求；</li>
@@ -154,7 +155,7 @@
 <li>prepare阶段id重复<strong>不会</strong>传递到propose阶段，条件是Acceptor在<strong>promise</strong>时<strong>拒绝</strong>小于<strong>等于</strong>当前持久化的minProposal。<br>分析：如果一个proposer1想要发起phase2 with number n，那么他需要获得majority的phase1的结果。<br>如果另一个proposer2想要发起phase2 with number n，他也需要获得majority的phase1的结果。<br>这两个majority一定有交集，交集中的acceptor不可能同时接受proposer1和proposer2的prepare request：因为phase1b只允许他答应其中一个。<br>因此这两个proposer在phase2发出的proposal不可能具有相同的n，因此paxos一开始的number全局唯一number是不必要的，只需要每个proposer本地的number唯一就好。</li>
 <li>这里容易混淆的地方是很多文章写的是prepare阶段拒绝小于minProposal的请求（也就是接受n==minProposal的请求）。如果这样的话，就需要全局唯一的Proposal ID了。</li>
 <li>怎样获得全局唯一的Proposal ID？<ul>
-<li>物理时间戳+ip：存疑。物理时间可能回调，导致生成两个相同的时间戳，全局不唯一</li>
+<li>物理时间戳：存疑。物理时间可能回调，导致生成两个相同的时间戳，全局不唯一</li>
 <li>本地递增自然数+ip：即使前面重复了，ip也能确保不重复</li>
 </ul>
 </li>
@@ -172,6 +173,7 @@
 <p>在Multi-Paxos中，我们将leader Elect过程中的prepare操作，视为对leader任期内将要写的所有日志的一次性prepare操作，在leader任期内投票的所有日志将携带有相同的proposalID。需要强调的是，为了遵守Basic-Paxos协议约束，在leader Elect的prepare阶段，acceptor应答prepare成功的消息之前要先将这次prepare请求所携带的proposalID持久化到本地。</p>
 <p>对于leader Elect过程，我们并不关心leader Elect提案和决议的具体内容，因为无论执行多少次leader Elect，从Basic-Paxos的角度来看，都是同一个Paxos Instance在对已经形成的决议反复进行投票而已。而执行leader Elect这个过程，我们最关注的是要得到最近一次形成决议的proposer是谁，以及它的proposalID。在leader Elect过程中，得到多数派accept的proposer将成为leader，而它本次所用的proposalID即成为它任期内对所有日志（包括新增日志和后文将提到的重确认日志）进行投票时将要使用的proposalID（称为leader ProposalID）。</p>
 <p>这里还需要考虑的一个问题是，由于多个server并发执行leader Elect，可能出现两个server在相近的时间内，先后执行leader Elect都成功，都认为自己是leader的情况。因此，当选leader在开始以leader身份提供服务之前，要使用leader ProposalID写一条日志（称为StartWorking日志），得到多数派确认后，再开始提供服务。这是因为根据Basic-Paxos的约束，可以推断出：先执行leader Elect成功的leader（称为L1），它的proposalID（称为P1）一定会小于后执行leader Elect成功的leader（称为L2）的proposalID（称为P2），而经过了两轮leader Elect，机群内多数派持久化的proposalID一定是P2，而此时L1使用P1执行accept时，由于P1 &lt; P2，它将无法得到机群内多数派的accept。</p>
+<p>PhxPaxos两篇关于leader和Master的文章：<br><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/21466932">Paxos理论介绍(2): Multi-Paxos与Leader</a><br><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/21540239">Paxos理论介绍(3): Master选举</a></p>
 <h3 id="Confirm日志的优化"><a href="#Confirm日志的优化" class="headerlink" title="Confirm日志的优化"></a>Confirm日志的优化</h3><p>在Paxos协议中，对于决议的读取也是需要执行一轮Paxos过程的，在实际工程中做数据恢复时，对每条日志都执行一轮Paxos的代价过大，因此引入需要引入一种被成为confirm的机制，即leader持久化一条日志，得到多数派的accept后，就再写一条针对这条日志的confirm日志，表示这条日志已经确认形成了多数派备份，在回放日志时，判断如果一条日志有对应的confirm日志，则可以直接读取本地内容，而不需要再执行一轮Paxos。confirm日志只要写本地即可，不需要同步到备机，但是出于提示备机及时回放收到日志的考虑（备机收到一条日志后并不能立即回放，需要确认这条日志已经形成多数派备份才能回放），leader也会批量的给备机同步confirm日志。出于性能的考虑，confirm日志往往是延迟的成批写出去，因此仍然会出现部分日志已经形成多数派备份，但是没有对应的confirm日志的情况，对于这些日志，需要在恢复过程中进行重确认。</p>
 <p>在实际的工程实践中，可以使用基于logID的滑动窗口机制来限制confirm日志与对应的原始日志的距离，以简化日志回放与查询逻辑。</p>
 <h3 id="新任leader对日志的重确认"><a href="#新任leader对日志的重确认" class="headerlink" title="新任leader对日志的重确认"></a>新任leader对日志的重确认</h3><p>如上一节所述，在恢复过程中，拥有对应confirm日志的原始日志，可以被直接回放。而没有对应confirm日志的原始日志，则需要执行一轮Paxos，这个过程被成为重确认。</p>
@@ -180,7 +182,7 @@
 <p>对于每条日志的重确认，需要执行一轮完整的Paxos过程，可能有些日志在恢复前确实未形成多数派备份，需要通过重新执行Paxos来把这些日志重新持久化才能回放。这种不管日志是否曾经形成多数派备份，都重新尝试持久化的原则，我们称之为“最大commit原则”。之所以要遵守“最大commit原则”，是因为我们无法区分出来未形成多数派备份的日志，而这些日志在上一任leader任期内，也必然是“未决”状态，尚未应答客户端，所以无论如何都重新持久化都是安全的。比如A/B/C三个server，一条日志在A/B上持久化成功，已经形成多数派，然后B宕机；另一种情况，A/B/C三个server，一条日志只在A上持久化成功，超时未形成多数派，然后B宕机。上述两种情况，最终的状态都是A上有一条日志，C上没有，在恢复时无法区分这条日志是否曾经形成过多数派，因此干脆按照“最大commit原则”将这条日志尝试重新在A/C上持久化后再回放。</p>
 <p>需要注意的是，重确认日志时，要使用当前的leader ProposalID作为Paxos协议中的proposalID来对日志执行Paxos过程。因此在回放日志时，对于logID相同的多条日志，要以proposalID最大的为准。</p>
 <h3 id="“幽灵复现”日志的处理"><a href="#“幽灵复现”日志的处理" class="headerlink" title="“幽灵复现”日志的处理"></a>“幽灵复现”日志的处理</h3><p>使用Paxos协议处理日志的备份与恢复，可以保证确认形成多数派的日志不丢失，但是无法避免一种被称为“幽灵复现”的现象，如下图所示：</p>
-<p><img src="../_pic/ghost.png" alt="幽灵复现"></p>
+<p><img src="https://pic1.zhimg.com/80/f3053bc5ba559a0d4dda0d951d3ef85c_1440w.png" alt="幽灵复现"></p>
 <ol>
 <li><p>第一轮中A被选为Leader，写下了1-10号日志，其中1-5号日志形成了多数派，并且已给客户端应答，而对于6-10号日志，客户端超时未能得到应答。</p>
 </li>
@@ -193,6 +195,31 @@
 <p>为了处理“幽灵复现”问题，我们在每条日志的内容中保存一个generateID，leader在生成这条日志时以当前的leader ProposalID作为generateID。按logID顺序回放日志时，因为leader在开始服务之前一定会写一条StartWorking日志，所以如果出现generateID相对前一条日志变小的情况，说明这是一条“幽灵复现”日志（它的generateID会小于StartWorking日志），要忽略掉这条日志。</p>
 <p>幽灵复现问题只会出现在持久化的log后的leader未与majority达成一致的尾巴部分，不会出现在空洞部分。因为第二阶段的leader重确认时会将空洞补上，但不会将尾巴补上。</p>
 <p>raft同样存在幽灵复现问题，通过no-op机制解决。本质上no-op和startWorking日志是一样的。</p>
+<p><a target="_blank" rel="noopener" href="http://blog.kongfy.com/2018/09/paxos_ghost_log/">Paxos与“幽灵复现”</a></p>
+<h2 id="成员变更"><a href="#成员变更" class="headerlink" title="成员变更"></a>成员变更</h2><p><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/359206808">Raft成员变更的工程实践</a><br><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/420278350">Joint Consensus两阶段成员变更的单步实现</a></p>
+<p>why?<br>成员变更也是一个一致性问题，即所有节点对新成员达成一致。但是成员变更又有其特殊性，因为在成员变更的过程中，参与投票的成员会发生变化。</p>
+<p>如果将成员变更当成一般的一致性问题，直接向Leader节点发送成员变更请求，Leader同步成员变更日志，达成多数派之后提交，各节点提交成员变更日志后从旧成员配置（Cold）切换到新成员配置（Cnew）。</p>
+<p>因为各个节点提交成员变更日志的时刻可能不同，造成各个节点从旧成员配置（Cold）切换到新成员配置（Cnew）的时刻不同。可能在某一时刻出现Cold和Cnew中同时存在两个不相交的多数派，进而可能选出两个Leader，形成不同的决议，破坏安全性。</p>
+<h3 id="Joint-Consensus-两阶段"><a href="#Joint-Consensus-两阶段" class="headerlink" title="Joint Consensus(两阶段)"></a>Joint Consensus(两阶段)</h3><p>Leader收到成员变更请求后，先向Cold和Cnew同步一条Cold,new日志，此后所有日志都需要Cold和Cnew两个多数派的确认。Cold,new日志在Cold和Cnew都达成多数派之后才能提交，此后Leader再向Cold和Cnew同步一条只包含Cnew的日志，此后日志只需要Cnew的多数派确认。Cnew日志只需要在Cnew达成多数派即可提交，此时成员变更完成，不在Cnew中的成员自动下线。</p>
+<p>注意点：<br>1、 Cold,new需要在Cold和Cnew两个集群取得多数派确认。<br>2、 不管是什么节点，只要新的配置写入它的log，它就用最新的。</p>
+<h3 id="单步成员变更"><a href="#单步成员变更" class="headerlink" title="单步成员变更"></a>单步成员变更</h3><p>增加或删除一个成员时的情形，如图3所示，可以从数学上严格证明，只要每次只允许增加或删除一个成员，Cold与Cnew不可能形成两个不相交的多数派。因此只要每次只增加或删除一个成员，从Cold可直接切换到Cnew，无需过渡成员配置，实现单步成员变更。</p>
+<p>raft单步变更有bug</p>
+<p><img src="https://pic1.zhimg.com/80/v2-f40dd27f1d49bd9c1c00ddb939b7e534_1440w.jpg"></p>
+<p>t₀：节点abcd的成员配置为C₀；</p>
+<p>t₁：节点abcd在Term 0选出a为Leader，b和c为Follower；</p>
+<p>t₂：节点a同步成员变更日志Cᵤ，只同步到a和u，未成功提交；</p>
+<p>t₃：节点a宕机；</p>
+<p>t₄：节点d在Term 1被选为Leader，b和c为Follower；</p>
+<p>t₅：节点d同步成员变更日志Cᵥ，同步到c、d、v，成功提交；</p>
+<p>t₆：节点d同步普通日志E，同步到c、d、v，成功提交；</p>
+<p>t₇：节点d宕机；</p>
+<p>t₈：节点a在Term 2重新选为Leader，u和b为Follower;</p>
+<p>t₉：节点a同步本地的日志Cᵤ给所有人，造成已提交的Cᵥ和E丢失。</p>
+<p>为什么会出现这样的问题呢？根本原因是上一任Leader的成员变更日志还没有同步到多数派就宕机了，新Leader一上任就进行成员变更，使用新的成员配置提交日志，之前上一任Leader重新上任之后可能形成另外一个多数派集合，产生脑裂，将已提交的日志覆盖，造成数据丢失。</p>
+<p>Raft作者在发现这个问题之后，也给出了修复方法。修复方法很简单, 跟Raft的日志Commit条件类似：新任Leader必须在当前Term提交一条日志之后，才允许同步成员变更日志。也即Leader在当前Term还未提交日志之前，不允许同步成员变更日志。</p>
+<p>按照这个修复方法，最简单的实现就是Leader上任后先提交一条no-op日志，然后再同步成员变更日志。这条no-op日志可以保证跟上一任Leader未提交的成员变更日志至少有一个节点交集，这样可以发现上一任Leader的日志是旧的，从而阻止上一任Leader重新选为Leader，进而阻止了脑裂的产生。</p>
+<p>对应上面这个例子，就是L₁当选Leader后必须先提交一条no-op日志，然后才能开始同步Cᵥ和E，以便能发现L₂的日志是旧的，从而阻止L₂当选Leader。</p>
+<p>另一种方法是使用Joint Consensus成员变更，没有这样的正确性问题。</p>
  
       <!-- reward -->
       
@@ -275,6 +302,15 @@
 
    
   <nav class="article-nav">
+    
+      <a href="/2022/02/22/%E5%85%AB%E8%82%A1%E6%96%87/" class="article-nav-link">
+        <strong class="article-nav-caption">上一篇</strong>
+        <div class="article-nav-title">
+          
+            八股文
+          
+        </div>
+      </a>
     
     
       <a href="/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/" class="article-nav-link">

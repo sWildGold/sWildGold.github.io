@@ -11,7 +11,7 @@
         name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1"
       />
-      <title>DDIA第七章-事务笔记 |  Hexo</title>
+      <title>八股文 |  Hexo</title>
   <meta name="generator" content="hexo-theme-ayer">
       
       <link rel="shortcut icon" href="/favicon.ico" />
@@ -55,7 +55,7 @@
     <main class="content on">
       <section class="outer">
   <article
-  id="post-DDIA第七章-事务笔记"
+  id="post-八股文"
   class="article article-type-post"
   itemscope
   itemprop="blogPost"
@@ -66,7 +66,7 @@
     <header class="article-header">
        
 <h1 class="article-title sea-center" style="border-left:0" itemprop="name">
-  DDIA第七章-事务笔记
+  八股文
 </h1>
  
 
@@ -74,15 +74,15 @@
     </header>
      
     <div class="article-meta">
-      <a href="/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/" class="article-date">
-  <time datetime="2022-01-22T14:46:54.000Z" itemprop="datePublished">2022-01-22</time>
+      <a href="/2022/02/22/%E5%85%AB%E8%82%A1%E6%96%87/" class="article-date">
+  <time datetime="2022-02-22T15:46:54.000Z" itemprop="datePublished">2022-02-22</time>
 </a>   
 <div class="word_count">
     <span class="post-time">
         <span class="post-meta-item-icon">
             <i class="ri-quill-pen-line"></i>
             <span class="post-meta-item-text"> Word count:</span>
-            <span class="post-count">1.4k</span>
+            <span class="post-count">1.5k</span>
         </span>
     </span>
 
@@ -91,7 +91,7 @@
         <span class="post-meta-item-icon">
             <i class="ri-book-open-line"></i>
             <span class="post-meta-item-text"> Reading time≈</span>
-            <span class="post-count">4 min</span>
+            <span class="post-count">5 min</span>
         </span>
     </span>
 </div>
@@ -106,46 +106,27 @@
   
     <div class="article-entry" itemprop="articleBody">
        
-  <h1 id="DDIA第七章-事务-笔记"><a href="#DDIA第七章-事务-笔记" class="headerlink" title="DDIA第七章-事务 笔记"></a>DDIA第七章-事务 笔记</h1><h2 id="前言"><a href="#前言" class="headerlink" title="前言"></a>前言</h2><p>本文参考了</p>
-<ul>
-<li>《数据库系统概念-第七版》第17、18章</li>
-<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/take-you-through-the-isolation-level-of-tidb-1">事务前沿研究 | 隔离级别的追溯与究明，带你读懂 TiDB 的隔离级别（上篇）</a></li>
-<li><a target="_blank" rel="noopener" href="https://pingcap.com/zh/blog/transaction-frontiers-research-article-talk4">事务前沿研究丨事务并发控制</a></li>
-</ul>
-<h2 id="事务的ACID"><a href="#事务的ACID" class="headerlink" title="事务的ACID"></a>事务的ACID</h2><ul>
-<li>原子性（Atomicity）：一个事务的所有效果在数据库中要么全部反映出来，要么根本不反映；故障不能让数据库处于事务部分执行的状态。但原子性不能保证事务的过程是原子发生的，还要配合Isolation。</li>
-<li>一致性（Consistency）：若数据库一开始是一致的，则事务执行后数据库仍处于一致性状态。这里的一致性是一种应用程序定义的状态正确性或不变性（invariants），例如，给账户打钱，两个账户最后的总金额应当不变。应用程序有责任正确地定义事务来保证一致性，这不是数据库可以保证的事情。(将C加入ACID只是为了让ACID听起来更顺口，当时并非觉得这是很重要的事情)</li>
-<li>隔离性（Isolation）：保证并发执行的事务是相互隔离的，互相感受不到对方的存在。ACID中的I指可串行化，即最后的结果与串行执行完全相同（等价）。</li>
-<li>持久性（Durability）：一旦事务提交，该事务的修改就不会丢失，即使出现系统故障。</li>
-</ul>
-<p>下面的内容都是关于Isolation的。</p>
-<h2 id="竞态条件-race-condition"><a href="#竞态条件-race-condition" class="headerlink" title="竞态条件(race condition)"></a>竞态条件(race condition)</h2><ul>
-<li>脏读/Dirty Reads：读到了其他事务未提交的写。Read Committed及以上隔离级别可以防止脏读。</li>
-<li>脏写/Dirty Writes：写覆盖了其他事务未提交的写。所有隔离级别都防止脏写。</li>
-<li>读倾斜（不可重复读）/Read skew (Nonrepeatable Reads)：在不同的时间点看到不同的值。快照隔离是最常用的防范手段。</li>
-<li>更新丢失/Lost updates: 两个事务读-修改-写同一对象，导致其中一个覆盖另一个的写入。</li>
-<li>写倾斜/Write skew: 一般化的更新丢失。两个事务查询相同的对象，根据返回结果作出一些决定，然后更新其中的一些对象（不同的事务可能更新不同的对象），导致其中一个事务做决定的前提条件发生变化。只有serializable isolation可以防止。</li>
-<li>幻读/Phantom reads: DDIA 认为这是导致Write skew的根源.事务读取了某些符合查询条件的对象，同时另一事务执行写入，改变了先前的查询结果。<a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/357735555">Phantom Read 是 Non-repeatable Read 的 predicate 的版本</a></li>
-</ul>
-<p>以上的概念貌似因为历史原因，盘根错节，特别复杂和混乱，这里的解释肯定也错误很多。看个大概就得了。<br><a target="_blank" rel="noopener" href="https://juejin.cn/post/6844903712368885768#heading-13">分布式事务中的一致性和隔离性</a></p>
-<h2 id="两阶段加锁-two-phase-locking-2PL"><a href="#两阶段加锁-two-phase-locking-2PL" class="headerlink" title="两阶段加锁(two-phase locking, 2PL)"></a>两阶段加锁(two-phase locking, 2PL)</h2><ul>
-<li>如果事务A已经读取了某个对象，此时事务B想要写入改对象，等A提交或终止。</li>
-<li>如果事务A已经修改了某个对象，此时事务B想要读取该对象，等A提交或终止。</li>
-</ul>
-<h3 id="2PL的实现"><a href="#2PL的实现" class="headerlink" title="2PL的实现"></a>2PL的实现</h3><ul>
-<li>如果事务要读取对象，必须获取共享锁。可以有多个事务同时获得共享锁，但如果独占锁已给出，则其他事务必须等待。</li>
-<li>如果事务要修改对象，必须获取独占锁。获取独占锁之前不能有锁。也就是说，如果对象已被上锁，则修改事务必须等待。</li>
-<li>如果事务先读取对象，再修改对象，需要将共享锁升级为独占锁。升级锁的流程等价于直接获得独占锁。</li>
-<li>事务获得锁之后，一直持有锁直到事务结束。这也是名字’two-phase’的来源，在第一阶段（事务执行之前）获取锁，在第二阶段（事务结束时）释放锁。</li>
-</ul>
-<h3 id="谓词锁"><a href="#谓词锁" class="headerlink" title="谓词锁"></a>谓词锁</h3><p>serializable isolation需要防止幻读问题。因此2PL需要引入谓词锁。它的作用类似于之前描述的共享/独占锁，而区别在于，它并不属于某个特定的对象（如表的某一行），而是作用于满足某些搜索条件的所有查询对象。</p>
-<p>谓词锁会限制如下访问：</p>
-<ul>
-<li>如果事务A想要读取某些满足匹配条件的对象，例如采用SELECT查询，它必须以共享模式获得查询条件的谓词锁。如果另一个事务B正持有任何一个匹配对象的互斥锁，那么A必须等到B释放锁之后才能继续执行查询。</li>
-<li>如果事务A想要插入、更新或删除任何对象，则必须首先检查所有旧值和新值是否与现有的任何谓词锁匹配（即冲突）。如果事务B持有这样的谓词锁，那么A必须等到B完成后才能继续。</li>
-</ul>
-<h3 id="索引区间锁"><a href="#索引区间锁" class="headerlink" title="索引区间锁"></a>索引区间锁</h3><p>谓词锁性能不佳。索引区间锁是将谓词锁保护的对象扩大化，选一个合适的索引对其施加共享锁。虽然索引区间锁会锁住更大的范围，但是开销更低。</p>
-<p>别人的笔记：<br><a target="_blank" rel="noopener" href="https://masutangu.com/2019/12/20/distributed-system-4/">漫谈分布式：事务和隔离性级别</a><br><a target="_blank" rel="noopener" href="https://masutangu.com/2019/12/22/distributed-system-5/">漫谈分布式：线性一致性与共识算法</a></p>
+  <h1 id="八股文"><a href="#八股文" class="headerlink" title="八股文"></a>八股文</h1><h2 id="计算机网络"><a href="#计算机网络" class="headerlink" title="计算机网络"></a>计算机网络</h2><h3 id="TCP-IP-五层模型-和-OSI-七层模型"><a href="#TCP-IP-五层模型-和-OSI-七层模型" class="headerlink" title="TCP/IP 五层模型 和 OSI 七层模型"></a>TCP/IP 五层模型 和 OSI 七层模型</h3><p>TCP/IP网络模型总共有五层</p>
+<p>1.<strong>应用层</strong>:我们能接触到的就是应用层了，手机，电脑这些这些设备都属于应用层。<br>2.<strong>传输层</strong>:就是<strong>为应用层提供网络支持</strong>的，当设备作为接收⽅时，传输层则要负责把数据包传给应⽤，但是⼀台设备上可能会有很多应⽤在接收或者传输数据，因此需要⽤⼀个编号将应⽤区分开来，这个编号就是端⼝。所以 TCP 和 UDP 协议就是在这一层的<br>3.<strong>网络层</strong>:是<strong>负责传输数据</strong>的，最常使用的 ip 协议就在该层，⽹络层负责将数据从⼀个设备传输到另⼀个设备，世界上有很多设备，⽹络层需要有区分设备的编号。我们⼀般⽤ IP 地址给设备进⾏编号<br>4.<strong>数据链路层</strong>:每⼀台设备的⽹卡都会有⼀个 MAC 地址，它就是⽤来唯⼀标识设备的。路由器计算出了下⼀个⽬的地 IP 地址，再通过 ARP 协议找到该⽬的地的 MAC 地址，这样就知道这个 IP 地址是哪个设备的了。路由器就是通过数据链路层来知道这个 ip 地址是属于哪个设备的，它主要<strong>为⽹络层提供链路级别传输的服务</strong>。<br>5.<strong>物理层</strong>:当数据准备要从设备发送到⽹络的时候，需要把数据包转换成电信号，让其可以在物理介质中传输，它主要是<strong>为数据链路层提供⼆进制传输的服务</strong>。</p>
+<p>OSI七层模型：</p>
+<p>应用层-&gt; 应用层、表示层、会话层</p>
+<p>表示层：数据格式化，加密、解密。对数据格式进行编译，对收到或发出的数据根据应用层的特征进行处理，如处理为文字、图片、音频、视频、文档等，还可以对压缩文进行解压缩，对加密文件进行解密等。</p>
+<p>会话层：建立、维护、管理会话连接。</p>
+<p>###TCP 建立连接的过程是怎样的？</p>
+<p><img src="https://filescdn.proginn.com/27cfff9a248b772309520ecae9af28c3/89e131cbf0bb238770808e7209140ce8.webp"></p>
+<p>第一次握手:A 的 TCP 进程创建一个 传输控制块 TCB ，然后向 B 发出连接请求报文段。之后将同步位 <strong>SYN 设置为 1</strong>，同时选择一个初始序列号 <strong>seq=x</strong>，这时客户端 A 进入到 <strong>SYN-SENT（同步已发送）</strong>状态。<br>第二次握手:B 收到连接请求报文段，如果同意建立连接，则向 A 发送确认。在确认报文段中 <strong>同步位 SYN=1、确认位 ACK=1、确认号 ack=x+1</strong>，同时也为自己选择一个初始序列号 <strong>seq=y</strong>，这时服务器 B 进入 SYN-RCVID 状态。<br>第三次握手:A 收到 B 的确认以后，再向 B 发出确认。确认报文 <strong>ACK=1、确认号ack=y+1</strong>。这时A进入到 ESTAB-LISHED 状态。<strong>当B接收到A的确认后，也进入 ESTAB-LISHED</strong> 状态。连接建立完成</p>
+<p>为什么需要三次握手？</p>
+<p>三次握⼿就已经是理论上<strong>建立可靠连接</strong>的最小次数了，所以不需要更多的连接</p>
+<h3 id="TCP断开连接的过程"><a href="#TCP断开连接的过程" class="headerlink" title="TCP断开连接的过程"></a>TCP断开连接的过程</h3><p><img src="https://filescdn.proginn.com/aaca88541c9dbd7358ddc910abf4d8ef/3db74420e3b61e74ccf24b1ff9eb2a7b.webp"></p>
+<p>第一次挥手:A 先发送连接释放报文段，段首部的终止控制位 <strong>FIN=1</strong>，序号<strong>seq=u</strong>（等于<strong>A前面发送数据的最后一个序号加1</strong>）；然后 A 进入 FIN-WAIT-1（终止等待1）状态，等待 B 的确认。</p>
+<p>第二次挥手:B 收到 A 的连接释放报文段后，立刻发出确认报文段，确认号 <strong>ack=u+1</strong>，序号 <strong>seq=v</strong>（等于 <strong>B 前面发送数据的最后一个序号加1</strong>）；然后 B 进入 CLOSE-WAIT（关闭等待）状态。</p>
+<p>第三次挥手:A 收到 B 的确认报文段后进入到 <strong>FIN-WAIT-2</strong>（终止等待2）状态，继续等待 B 发出连接释放报文段；</p>
+<p>若 B 已经没有数据要发送，B 就会向 A 发送连接释放报文段，段首部的终止控制位 <strong>FIN=1</strong>，序号 <strong>seq=w</strong>（半关闭状态可能又发送了一些数据），确认号 <strong>ack=u+1</strong>，这时B进入 <strong>LAST-ACK</strong>（最后确认）状态，等待A的确认。<br>第四次挥手:A收到B的连接释放报文段并发出确认，确认段中 确认位 <strong>ACK=1</strong>，确认号 <strong>ack=w+1</strong>，序号 <strong>seq=u+1</strong>；然后 A 进入到<strong>TIME-WAIT</strong>（时间等待）状态。当 B 再接收到该确认段后，B 就进入 <strong>CLOSED</strong>状态。</p>
+<p>为什么是四次挥手</p>
+<p>因为 tcp 可以在发送数据的同时也能接受数据，要实现可靠的连接关闭，A 发出结束报文 FIN，收到 B 确认后 A 知道自己没有数据需要发送了，B 知道 A 不再发送数据了，自己也不会接收数据了，<strong>但是此时 A 还是可以接收数据，B 也可以发送数据</strong>；当 B 发出 FIN 报文的时候此时两边才会真正的断开连接，读写分开。</p>
+<h3 id="TCP滑动窗口"><a href="#TCP滑动窗口" class="headerlink" title="TCP滑动窗口"></a>TCP滑动窗口</h3><p><a target="_blank" rel="noopener" href="https://www.cnblogs.com/xiaolincoding/p/12732052.html">https://www.cnblogs.com/xiaolincoding/p/12732052.html</a><br>TCP 是<strong>每发送⼀个数据，都要进⾏⼀次确认应答</strong>。只有上一个收到了回应才发送下一个，这样<strong>效率会非常低</strong>，因此<strong>引进了滑动窗口</strong>的概念.</p>
+<p>其实就是在发送方<strong>设立一个缓存区间</strong>，将已发送但未收到确认的消息<strong>缓存</strong>起来，<strong>假如一个窗口可以发送 5 个 TCP 段</strong>，那么发送方就可以连续发送 5 个 TCP 段，然后就会将这 5 个 TCP 段的数据缓存起来，这 5 个 TCP 段是有序的，只要后面的消息收到了 ACK ，那么不管前面的是否有收到 ACK,都代表成功，<strong>窗⼝⼤⼩是由接收方决定的</strong>。</p>
+<p>窗⼝⼤⼩就是指<strong>不需要等待应答，还可以发送数据的大小</strong></p>
  
       <!-- reward -->
       
@@ -216,12 +197,12 @@
     <a class="modal-close" href="javascript:;"><i class="ri-close-circle-line"></i></a>
     <p>扫一扫，分享到微信</p>
     <div class="wx-qrcode">
-      <img src="//api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://example.com/2022/01/22/DDIA%E7%AC%AC%E4%B8%83%E7%AB%A0-%E4%BA%8B%E5%8A%A1%E7%AC%94%E8%AE%B0/" alt="微信分享二维码">
+      <img src="//api.qrserver.com/v1/create-qr-code/?size=150x150&data=http://example.com/2022/02/22/%E5%85%AB%E8%82%A1%E6%96%87/" alt="微信分享二维码">
     </div>
 </div>
 
 <div id="share-mask"></div>  
-  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/DDIA/" rel="tag">DDIA</a></li></ul>
+  <ul class="article-tag-list" itemprop="keywords"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/%E5%85%AB%E8%82%A1/" rel="tag">八股</a></li></ul>
 
     </footer>
   </div>
@@ -229,19 +210,19 @@
    
   <nav class="article-nav">
     
-      <a href="/2022/01/22/%E7%AE%97%E6%B3%95%E9%A2%98-%E6%98%93%E5%BF%98%E7%82%B9/" class="article-nav-link">
+      <a href="/2022/02/24/LinuxIO/" class="article-nav-link">
         <strong class="article-nav-caption">上一篇</strong>
         <div class="article-nav-title">
           
-            算法题-易忘点
+            Linux I/O
           
         </div>
       </a>
     
     
-      <a href="/2021/11/29/DDIA%E7%AC%AC%E4%BA%94%E7%AB%A0-%E6%95%B0%E6%8D%AE%E5%A4%8D%E5%88%B6%E7%AC%94%E8%AE%B0/" class="article-nav-link">
+      <a href="/2022/01/28/Paxos%E7%AC%94%E8%AE%B0/" class="article-nav-link">
         <strong class="article-nav-caption">下一篇</strong>
-        <div class="article-nav-title">DDIA第五章-数据复制笔记</div>
+        <div class="article-nav-title">Paxos 笔记</div>
       </a>
     
   </nav>
